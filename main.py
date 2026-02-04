@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from src.converter import convert
+from src.exclusion import load_exclusion_rules, ExclusionRuleSyntaxError
 
 
 def main() -> int:
@@ -73,6 +74,12 @@ Examples:
         help="Output file delimiter (default: comma)"
     )
 
+    parser.add_argument(
+        "--exclude",
+        type=Path,
+        help="Path to exclusion rules file"
+    )
+
     args = parser.parse_args()
 
     # Validate input files exist
@@ -84,11 +91,25 @@ Examples:
         print(f"Error: Source file not found: {args.source}", file=sys.stderr)
         return 1
 
+    if args.exclude and not args.exclude.exists():
+        print(f"Error: Exclusion rules file not found: {args.exclude}", file=sys.stderr)
+        return 1
+
     # Create output directory if needed
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     # Determine delimiter
     delimiter = '\t' if args.delimiter == "tab" else ','
+
+    # Load exclusion rules if provided
+    exclusion_rules = None
+    if args.exclude:
+        try:
+            exclusion_rules = load_exclusion_rules(args.exclude)
+            print(f"Loaded {len(exclusion_rules)} exclusion rules from: {args.exclude}")
+        except ExclusionRuleSyntaxError as e:
+            print(f"Error in exclusion rules file: {e}", file=sys.stderr)
+            return 1
 
     # Run conversion
     try:
@@ -104,7 +125,8 @@ Examples:
             output_path=args.output,
             fps=args.fps,
             collapse=not args.no_collapse,
-            delimiter=delimiter
+            delimiter=delimiter,
+            exclusion_rules=exclusion_rules
         )
 
         print("-" * 40)

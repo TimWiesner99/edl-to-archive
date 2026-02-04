@@ -8,6 +8,7 @@ from typing import Optional
 
 from .timecode import Timecode
 from .models import EDLEntry, SourceEntry, DefEntry
+from .exclusion import ExclusionRuleSet, filter_edl_entries
 
 
 # Encodings to try when reading files
@@ -397,7 +398,8 @@ def convert(
     output_path: Path | str,
     fps: int = 25,
     collapse: bool = True,
-    delimiter: str = ','
+    delimiter: str = ',',
+    exclusion_rules: ExclusionRuleSet | None = None
 ) -> list[DefEntry]:
     """Main conversion function: EDL + Source -> Definitive List.
 
@@ -408,6 +410,7 @@ def convert(
         fps: Frame rate for timecode handling
         collapse: Whether to collapse consecutive same-name entries
         delimiter: Output file delimiter
+        exclusion_rules: Optional exclusion rules to filter entries before processing
 
     Returns:
         List of DefEntry objects that were saved
@@ -418,6 +421,11 @@ def convert(
 
     print(f"Loaded {len(edl_entries)} EDL entries")
     print(f"Loaded {len(source_entries)} source entries")
+
+    # Apply exclusion rules (before collapse)
+    if exclusion_rules:
+        edl_entries, excluded = filter_edl_entries(edl_entries, exclusion_rules)
+        print(f"Excluded {len(excluded)} entries based on exclusion rules")
 
     # Collapse EDL if requested
     if collapse:
