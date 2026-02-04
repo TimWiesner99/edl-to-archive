@@ -6,6 +6,8 @@ ASSERT that EDL headers = ID, Reel, Name, File Name, Track, Timecode In, Timecod
 
 ASSERT that SOURCE headers = Name, Description, Link, Source, Cost, rights_contact, todo_notes, source_in_frame, credits
 
+IF column names don't match, check if Dutch names are present and import accordingly. For example, "name" might be "bestandsnaam"
+
 # collapse EDL (if one entry is mentioned two times immediatly after each other, combine them into one)
 FOR every row in EDL:
 	skip first row
@@ -20,14 +22,18 @@ FOR every row in EDL:
 
 
 # make DEF list
-make new pandas table DEF
+make new pandas table DEF with same cols as SOURCE and add cols timecode_in, duration
 
 FOR every row in EDL:
 	edl = this row
 	find entry in SOURCE where EDL.name == SOURCE.name
-	source = row from SOURCE
-	make new row(name = edl.name, timedoce_in = edl.timecode_in, duration = edl.duration
+	IF found:
+		source = row from SOURCE
+		make new row(name = edl.name, timedoce_in = edl.timecode_in, duration = edl.duration, ...)
+		# ... = copy all other columns from the SOURCE table (like link, source, etc)
+	ELSE:
+		make new row(name = edl.name, timedoce_in = edl.timecode_in, duration = edl.duration, ...)
+		# ... = leave rest empty, will be done manually
 
-
-
+	add new row to DEF list
 
