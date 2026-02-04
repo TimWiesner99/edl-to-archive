@@ -1,0 +1,33 @@
+# load both .csv files
+LOAD EDL as pandas table
+LOAD SOURCE as pandas table
+
+ASSERT that EDL headers = ID, Reel, Name, File Name, Track, Timecode In, Timecode Out, Duration, Source Start, Source End, Audio Channels, Comment
+
+ASSERT that SOURCE headers = Name, Description, Link, Source, Cost, rights_contact, todo_notes, source_in_frame, credits
+
+# collapse EDL (if one entry is mentioned two times immediatly after each other, combine them into one)
+FOR every row in EDL:
+	skip first row
+	LOAD this row as object
+	LOAD previous row as object
+	IF this.Name == previous.Name
+		make new row(name= this.name, timecode_in = previous.timecode_in, source_start = min(previous.source_start, this.source_start), timecode_out = previous.timecode_out, source_end = max(previous.source_start, this.source_start), duration=previous.duration + this.duration)
+
+		remove this row
+		remove previous row
+		insert new row (at this position)
+
+
+# make DEF list
+make new pandas table DEF
+
+FOR every row in EDL:
+	edl = this row
+	find entry in SOURCE where EDL.name == SOURCE.name
+	source = row from SOURCE
+	make new row(name = edl.name, timedoce_in = edl.timecode_in, duration = edl.duration
+
+
+
+
