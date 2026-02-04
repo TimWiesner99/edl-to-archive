@@ -372,14 +372,14 @@ def generate_def_list(
 def save_def_list(
     def_list: list[DefEntry],
     output_path: Path | str,
-    delimiter: str = '\t'
+    delimiter: str = ','
 ) -> None:
     """Save the definitive list to a CSV file.
 
     Args:
         def_list: List of DefEntry objects to save
         output_path: Path for the output file
-        delimiter: CSV delimiter (default is tab)
+        delimiter: CSV delimiter (default is comma)
     """
     output_path = Path(output_path)
 
@@ -397,7 +397,7 @@ def convert(
     output_path: Path | str,
     fps: int = 25,
     collapse: bool = True,
-    delimiter: str = '\t'
+    delimiter: str = ','
 ) -> list[DefEntry]:
     """Main conversion function: EDL + Source -> Definitive List.
 

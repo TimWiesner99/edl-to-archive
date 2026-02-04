@@ -69,8 +69,8 @@ Examples:
     parser.add_argument(
         "--delimiter",
         choices=["tab", "comma"],
-        default="tab",
-        help="Output file delimiter (default: tab)"
+        default="comma",
+        help="Output file delimiter (default: comma)"
     )
 
     args = parser.parse_args()
