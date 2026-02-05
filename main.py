@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from src.converter import convert
+from src.exclusion import load_exclusion_rules, ExclusionRuleSyntaxError
 
 
 def main() -> int:
@@ -69,8 +70,21 @@ Examples:
     parser.add_argument(
         "--delimiter",
         choices=["tab", "comma"],
-        default="tab",
-        help="Output file delimiter (default: tab)"
+        default="comma",
+        help="Output file delimiter (default: comma)"
+    )
+
+    parser.add_argument(
+        "--exclude",
+        type=Path,
+        help="Path to exclusion rules file"
+    )
+
+    parser.add_argument(
+        "-v", "--verbose",
+        action="count",
+        default=0,
+        help="Verbosity: -v for basic output, -vv for detailed evaluation traces"
     )
 
     args = parser.parse_args()
@@ -84,11 +98,26 @@ Examples:
         print(f"Error: Source file not found: {args.source}", file=sys.stderr)
         return 1
 
+    if args.exclude and not args.exclude.exists():
+        print(f"Error: Exclusion rules file not found: {args.exclude}", file=sys.stderr)
+        return 1
+
     # Create output directory if needed
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     # Determine delimiter
     delimiter = '\t' if args.delimiter == "tab" else ','
+
+    # Load exclusion rules if provided
+    exclusion_rules = None
+    if args.exclude:
+        try:
+            print(f"\nLoading exclusion rules from: {args.exclude}")
+            exclusion_rules = load_exclusion_rules(args.exclude)
+            print(f"  Loaded {len(exclusion_rules)} exclusion rules\n")
+        except ExclusionRuleSyntaxError as e:
+            print(f"Error in exclusion rules file: {e}", file=sys.stderr)
+            return 1
 
     # Run conversion
     try:
@@ -96,6 +125,9 @@ Examples:
         print(f"With source: {args.source}")
         print(f"Frame rate: {args.fps} fps")
         print(f"Collapse consecutive: {not args.no_collapse}")
+        if args.verbose > 0:
+            verbose_mode = "basic (-v)" if args.verbose == 1 else "detailed (-vv)" if args.verbose == 2 else f"level {args.verbose}"
+            print(f"Verbose mode: {verbose_mode}")
         print("-" * 40)
 
         convert(
@@ -104,7 +136,10 @@ Examples:
             output_path=args.output,
             fps=args.fps,
             collapse=not args.no_collapse,
-            delimiter=delimiter
+            delimiter=delimiter,
+            exclusion_rules=exclusion_rules,
+            verbose=args.verbose > 0,
+            verbose_level=args.verbose
         )
 
         print("-" * 40)

@@ -160,6 +160,8 @@ class DefEntry:
         return {
             "TC in": self.timecode_in.to_string(),
             "Duur": self.duration.to_string(),
+            "Bron TC in": self.source_start.to_string() if self.source_start else "",
+            "Bron TC uit": self.source_end.to_string() if self.source_end else "",
             "Bestandsnaam": self.name,
             "Omschrijving": self.description,
             "Link": self.link,
