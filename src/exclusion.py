@@ -217,15 +217,28 @@ class Comparison(Expression):
     operator: str    # "IS" or "INCLUDES"
     value: str       # The string value to compare against
 
-    def evaluate(self, entry: EDLEntry) -> bool:
+    def evaluate_with_context(self, entry: EDLEntry,
+                            ctx: EvaluationContext | None = None) -> bool:
+        """Evaluate comparison and record trace if context is enabled."""
         field_value = str(getattr(entry, self.field, ""))
 
         if self.operator == "IS":
-            return field_value == self.value
+            result = field_value == self.value
         elif self.operator == "INCLUDES":
-            return self.value in field_value
+            result = self.value in field_value
         else:
-            return False
+            result = False
+
+        # Record evaluation trace if context enabled
+        if ctx and ctx.enabled:
+            ctx.record_comparison(self.field, self.operator, self.value,
+                                field_value, result)
+
+        return result
+
+    def evaluate(self, entry: EDLEntry) -> bool:
+        """Backward compatible evaluation without context."""
+        return self.evaluate_with_context(entry, None)
 
 
 @dataclass
@@ -234,8 +247,34 @@ class AndExpression(Expression):
     left: Expression
     right: Expression
 
+    def evaluate_with_context(self, entry: EDLEntry,
+                            ctx: EvaluationContext | None = None) -> bool:
+        """Evaluate AND and record trace if context is enabled."""
+        # Record the AND operation at current depth
+        if ctx and ctx.enabled:
+            ctx.push_depth()
+
+        left_result = self.left.evaluate_with_context(entry, ctx)
+
+        # Short-circuit evaluation
+        if not left_result:
+            if ctx and ctx.enabled:
+                ctx.pop_depth()
+                ctx.record_logical_op("AND", left_result, False, False)
+            return False
+
+        right_result = self.right.evaluate_with_context(entry, ctx)
+        final_result = left_result and right_result
+
+        if ctx and ctx.enabled:
+            ctx.pop_depth()
+            ctx.record_logical_op("AND", left_result, right_result, final_result)
+
+        return final_result
+
     def evaluate(self, entry: EDLEntry) -> bool:
-        return self.left.evaluate(entry) and self.right.evaluate(entry)
+        """Backward compatible evaluation without context."""
+        return self.evaluate_with_context(entry, None)
 
 
 @dataclass
@@ -244,8 +283,34 @@ class OrExpression(Expression):
     left: Expression
     right: Expression
 
+    def evaluate_with_context(self, entry: EDLEntry,
+                            ctx: EvaluationContext | None = None) -> bool:
+        """Evaluate OR and record trace if context is enabled."""
+        # Record the OR operation at current depth
+        if ctx and ctx.enabled:
+            ctx.push_depth()
+
+        left_result = self.left.evaluate_with_context(entry, ctx)
+
+        # Short-circuit evaluation
+        if left_result:
+            if ctx and ctx.enabled:
+                ctx.pop_depth()
+                ctx.record_logical_op("OR", left_result, True, True)
+            return True
+
+        right_result = self.right.evaluate_with_context(entry, ctx)
+        final_result = left_result or right_result
+
+        if ctx and ctx.enabled:
+            ctx.pop_depth()
+            ctx.record_logical_op("OR", left_result, right_result, final_result)
+
+        return final_result
+
     def evaluate(self, entry: EDLEntry) -> bool:
-        return self.left.evaluate(entry) or self.right.evaluate(entry)
+        """Backward compatible evaluation without context."""
+        return self.evaluate_with_context(entry, None)
 
 
 @dataclass
@@ -253,8 +318,120 @@ class NotExpression(Expression):
     """Logical NOT of an expression."""
     operand: Expression
 
+    def evaluate_with_context(self, entry: EDLEntry,
+                            ctx: EvaluationContext | None = None) -> bool:
+        """Evaluate NOT and record trace if context is enabled."""
+        if ctx and ctx.enabled:
+            ctx.push_depth()
+
+        operand_result = self.operand.evaluate_with_context(entry, ctx)
+        final_result = not operand_result
+
+        if ctx and ctx.enabled:
+            ctx.pop_depth()
+            ctx.record_logical_op("NOT", operand_result, None, final_result)
+
+        return final_result
+
     def evaluate(self, entry: EDLEntry) -> bool:
-        return not self.operand.evaluate(entry)
+        """Backward compatible evaluation without context."""
+        return self.evaluate_with_context(entry, None)
+
+
+@dataclass
+class EvaluationStep:
+    """Records a single step in expression evaluation."""
+    expression_type: str  # "Comparison", "AND", "OR", "NOT"
+    result: bool          # Evaluation result
+    details: dict         # Type-specific details (field, operator, values, etc.)
+    depth: int           # Nesting level for indented display
+
+    def format(self, indent: str = "    ") -> str:
+        """Format this step with proper indentation and visual markers (✓/✗)."""
+        # Use ASCII markers for Windows console compatibility
+        marker = "[TRUE]" if self.result else "[FALSE]"
+        base_indent = indent * self.depth
+
+        if self.expression_type == "Comparison":
+            field = self.details.get("field", "")
+            operator = self.details.get("operator", "")
+            expected = self.details.get("expected", "")
+            actual = self.details.get("actual", "")
+            return (f"{base_indent}{marker} {field} {operator} \"{expected}\"\n"
+                   f"{base_indent}   (actual value: \"{actual}\" -> {self.result})")
+
+        elif self.expression_type in ("AND", "OR"):
+            left = self.details.get("left", False)
+            right = self.details.get("right", False)
+            return (f"{base_indent}{marker} {self.expression_type} "
+                   f"({left} {self.expression_type} {right} -> {self.result})")
+
+        elif self.expression_type == "NOT":
+            operand = self.details.get("operand", False)
+            return f"{base_indent}{marker} NOT ({operand} -> {self.result})"
+
+        return f"{base_indent}{marker} {self.expression_type}: {self.result}"
+
+
+class EvaluationContext:
+    """Collects detailed evaluation trace for debugging."""
+
+    def __init__(self, enabled: bool = False):
+        self.enabled = enabled
+        self.steps: list[EvaluationStep] = []
+        self.current_depth = 0
+
+    def record_comparison(self, field: str, operator: str, expected: str,
+                         actual: str, result: bool):
+        """Record a comparison evaluation step."""
+        if not self.enabled:
+            return
+        step = EvaluationStep(
+            expression_type="Comparison",
+            result=result,
+            details={
+                "field": field,
+                "operator": operator,
+                "expected": expected,
+                "actual": actual
+            },
+            depth=self.current_depth
+        )
+        self.steps.append(step)
+
+    def record_logical_op(self, op_type: str, left_result: bool,
+                         right_result: bool | None, final_result: bool):
+        """Record a logical operator evaluation."""
+        if not self.enabled:
+            return
+        details = {"left": left_result, "final": final_result}
+        if right_result is not None:
+            details["right"] = right_result
+        else:
+            details["operand"] = left_result
+
+        step = EvaluationStep(
+            expression_type=op_type,
+            result=final_result,
+            details=details,
+            depth=self.current_depth
+        )
+        self.steps.append(step)
+
+    def push_depth(self):
+        """Increase nesting depth for sub-expressions."""
+        self.current_depth += 1
+
+    def pop_depth(self):
+        """Decrease nesting depth."""
+        if self.current_depth > 0:
+            self.current_depth -= 1
+
+    def format_trace(self) -> str:
+        """Format complete trace as human-readable string."""
+        if not self.steps:
+            return ""
+        return "\n".join(step.format() for step in self.steps)
 
 
 class Parser:
@@ -388,13 +565,30 @@ def parse_rule(text: str) -> Expression:
     return parser.parse()
 
 
+@dataclass
+class Rule:
+    """A parsed rule with its original text for display."""
+    expression: Expression
+    text: str
+    line_number: int
+
+    def evaluate(self, entry: EDLEntry) -> bool:
+        return self.expression.evaluate(entry)
+
+    def evaluate_with_trace(self, entry: EDLEntry) -> tuple[bool, EvaluationContext]:
+        """Evaluate and return detailed trace."""
+        ctx = EvaluationContext(enabled=True)
+        result = self.expression.evaluate_with_context(entry, ctx)
+        return result, ctx
+
+
 class ExclusionRuleSet:
     """A collection of exclusion rules.
 
     Rules are OR'd together - if ANY rule matches, the entry is excluded.
     """
 
-    def __init__(self, rules: list[Expression]):
+    def __init__(self, rules: list[Rule]):
         self.rules = rules
 
     def matches(self, entry: EDLEntry) -> bool:
@@ -408,11 +602,56 @@ class ExclusionRuleSet:
         """
         return any(rule.evaluate(entry) for rule in self.rules)
 
+    def find_matching_rule(self, entry: EDLEntry) -> Rule | None:
+        """Find the first rule that matches the entry.
+
+        Args:
+            entry: The EDL entry to check
+
+        Returns:
+            The first matching Rule, or None if no rule matches
+        """
+        for rule in self.rules:
+            if rule.evaluate(entry):
+                return rule
+        return None
+
+    def find_matching_rule_with_trace(self, entry: EDLEntry) -> tuple[Rule | None, EvaluationContext | None]:
+        """Find first matching rule and return evaluation trace.
+
+        Args:
+            entry: The EDL entry to check
+
+        Returns:
+            Tuple of (matching Rule or None, EvaluationContext or None)
+        """
+        for rule in self.rules:
+            result, trace = rule.evaluate_with_trace(entry)
+            if result:
+                return rule, trace
+        return None, None
+
+    def get_exclusion_stats(self, excluded_entries: list[EDLEntry]) -> dict[int, int]:
+        """Return dict mapping rule_number -> count of excluded entries.
+
+        Args:
+            excluded_entries: List of entries that were excluded
+
+        Returns:
+            Dictionary mapping rule line_number to count of entries it excluded
+        """
+        stats: dict[int, int] = {}
+        for entry in excluded_entries:
+            matching_rule = self.find_matching_rule(entry)
+            if matching_rule:
+                stats[matching_rule.line_number] = stats.get(matching_rule.line_number, 0) + 1
+        return stats
+
     def __len__(self) -> int:
         return len(self.rules)
 
 
-def load_exclusion_rules(filepath: Path | str) -> ExclusionRuleSet:
+def load_exclusion_rules(filepath: Path | str, verbose: bool = False) -> ExclusionRuleSet:
     """Load exclusion rules from a file.
 
     Each non-empty, non-comment line is parsed as a rule.
@@ -420,6 +659,7 @@ def load_exclusion_rules(filepath: Path | str) -> ExclusionRuleSet:
 
     Args:
         filepath: Path to the rules file
+        verbose: If True, print detailed loading information
 
     Returns:
         ExclusionRuleSet containing all parsed rules
@@ -433,20 +673,23 @@ def load_exclusion_rules(filepath: Path | str) -> ExclusionRuleSet:
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line_num, line in enumerate(f, start=1):
-            line = line.strip()
+            original_line = line.strip()
 
             # Skip empty lines and comments
-            if not line or line.startswith('#'):
+            if not original_line or original_line.startswith('#'):
                 continue
 
             try:
-                rule = parse_rule(line)
+                expression = parse_rule(original_line)
+                rule = Rule(expression=expression, text=original_line, line_number=line_num)
                 rules.append(rule)
+                # Always print each rule (not just in verbose mode)
+                print(f"  Rule {len(rules)} (line {line_num}): {original_line}")
             except ExclusionRuleSyntaxError as e:
                 raise ExclusionRuleSyntaxError(
                     str(e),
                     line_number=line_num,
-                    line=line
+                    line=original_line
                 ) from None
 
     return ExclusionRuleSet(rules)
@@ -454,13 +697,17 @@ def load_exclusion_rules(filepath: Path | str) -> ExclusionRuleSet:
 
 def filter_edl_entries(
     entries: list[EDLEntry],
-    rules: ExclusionRuleSet
+    rules: ExclusionRuleSet,
+    verbose: bool = False,
+    verbose_level: int = 1
 ) -> tuple[list[EDLEntry], list[EDLEntry]]:
     """Filter EDL entries based on exclusion rules.
 
     Args:
         entries: List of EDL entries to filter
         rules: Exclusion rules to apply
+        verbose: If True, print details for each entry processed
+        verbose_level: 1 = basic output, 2 = detailed evaluation traces
 
     Returns:
         Tuple of (kept_entries, excluded_entries)
@@ -468,10 +715,34 @@ def filter_edl_entries(
     kept = []
     excluded = []
 
-    for entry in entries:
-        if rules.matches(entry):
+    for i, entry in enumerate(entries, start=1):
+        if verbose_level >= 2:
+            # Verbose level 2: detailed trace
+            matching_rule, trace = rules.find_matching_rule_with_trace(entry)
+        else:
+            # Verbose level 1 or less: basic evaluation
+            matching_rule = rules.find_matching_rule(entry)
+            trace = None
+
+        if matching_rule:
             excluded.append(entry)
+            if verbose:
+                # Print entry details
+                print(f"\nEntry {i} EXCLUDED:")
+                print(f"  name: \"{entry.name}\"")
+                print(f"  file_name: \"{entry.file_name}\"")
+                print(f"  reel: \"{entry.reel}\"")
+                print(f"  track: \"{entry.track}\"")
+                print(f"  comment: \"{entry.comment}\"")
+                print(f"\n  Matched rule {matching_rule.line_number}: {matching_rule.text}")
+
+                # Print evaluation trace if level 2
+                if verbose_level >= 2 and trace:
+                    print(f"\n  Evaluation trace:")
+                    print(trace.format_trace())
         else:
             kept.append(entry)
+            if verbose:
+                print(f"  Entry {i} kept: name=\"{entry.name}\"")
 
     return kept, excluded

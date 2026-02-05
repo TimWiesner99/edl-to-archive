@@ -13,6 +13,9 @@ python main.py <edl_file> <source_file> -o <output_file> [options]
 - `--no-collapse` - Don't collapse consecutive entries with the same name
 - `--delimiter <tab|comma>` - Output file delimiter (default: comma)
 - `--exclude <file>` - Path to exclusion rules file
+- `-v, --verbose` - Verbosity levels:
+  - `-v` - Basic verbose output (shows which entries are excluded and matched)
+  - `-vv` - Detailed verbose output (includes evaluation traces showing why rules matched)
 
 ### Examples
 
@@ -22,6 +25,12 @@ python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv
 
 # With exclusion rules
 python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --exclude exclude.txt
+
+# With verbose output to see which entries are excluded
+python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --exclude exclude.txt -v
+
+# With detailed verbose output to debug exclusion rules
+python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --exclude exclude.txt -vv
 
 # Different frame rate, tab-delimited output
 python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --fps 24 --delimiter tab
@@ -76,3 +85,44 @@ name INCLUDES "TEST" OR name INCLUDES "test"
 ```
 
 Lines starting with `#` are treated as comments.
+
+### Debugging with Verbose Output
+
+When troubleshooting exclusion rules, use the `-v` or `-vv` flags:
+
+**Basic verbose (`-v`):** Shows which entries are excluded and which rule matched:
+```
+Entry 42 EXCLUDED:
+  name: "SYNC_VIDEO.MXF"
+  file_name: ""
+  reel: "001"
+  track: "V1"
+  comment: ""
+
+  Matched rule 1: file_name IS "" AND name INCLUDES "SYNC"
+```
+
+**Detailed verbose (`-vv`):** Also shows the evaluation trace with field values and expression results:
+```
+Entry 42 EXCLUDED:
+  name: "SYNC_VIDEO.MXF"
+  file_name: ""
+  reel: "001"
+  track: "V1"
+  comment: ""
+
+  Matched rule 1: file_name IS "" AND name INCLUDES "SYNC"
+
+  Evaluation trace:
+    ✓ AND (True AND True -> True)
+        ✓ file_name IS ""
+           (actual value: "" -> True)
+        ✓ name INCLUDES "SYNC"
+           (actual value: "SYNC_VIDEO.MXF" -> True)
+```
+
+The evaluation trace shows:
+- ✓ for conditions that evaluated to true
+- ✗ for conditions that evaluated to false
+- Actual field values from the entry
+- How logical operators (AND/OR/NOT) combined the results

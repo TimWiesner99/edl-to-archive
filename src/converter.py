@@ -239,7 +239,7 @@ def normalize_name(name: str) -> str:
     return name.lower().strip()
 
 
-def collapse_edl(entries: list[EDLEntry], fps: int = 25) -> list[EDLEntry]:
+def collapse_edl(entries: list[EDLEntry], fps: int = 25, verbose: bool = False) -> list[EDLEntry]:
     """Collapse consecutive EDL entries with the same name.
 
     When two or more consecutive entries have the same name, they are combined
@@ -253,6 +253,7 @@ def collapse_edl(entries: list[EDLEntry], fps: int = 25) -> list[EDLEntry]:
     Args:
         entries: List of EDL entries
         fps: Frame rate for timecode operations
+        verbose: If True, print details for each collapse operation
 
     Returns:
         List of collapsed EDL entries
@@ -275,6 +276,9 @@ def collapse_edl(entries: list[EDLEntry], fps: int = 25) -> list[EDLEntry]:
         if j > i + 1:
             # Combine all entries from i to j-1
             group = entries[i:j]
+
+            if verbose:
+                print(f"  Collapsing {len(group)} consecutive entries: \"{current.name}\"")
 
             # Calculate combined values
             combined_duration = Timecode.from_frames(0, fps)
@@ -346,7 +350,8 @@ def find_source_match(
 
 def generate_def_list(
     edl_entries: list[EDLEntry],
-    source_entries: list[SourceEntry]
+    source_entries: list[SourceEntry],
+    verbose: bool = False
 ) -> list[DefEntry]:
     """Generate the definitive archive list from EDL and source entries.
 
@@ -356,18 +361,55 @@ def generate_def_list(
     Args:
         edl_entries: List of (collapsed) EDL entries
         source_entries: List of source entries
+        verbose: If True, print details for each match
 
     Returns:
         List of DefEntry objects
     """
     def_list = []
 
-    for edl in edl_entries:
+    for i, edl in enumerate(edl_entries, start=1):
         source = find_source_match(edl.name, source_entries)
         def_entry = DefEntry.from_edl_and_source(edl, source)
         def_list.append(def_entry)
 
+        if verbose:
+            if source:
+                print(f"  Entry {i}: \"{edl.name}\" -> matched source \"{source.name}\"")
+            else:
+                print(f"  Entry {i}: \"{edl.name}\" -> NO SOURCE MATCH")
+
     return def_list
+
+
+def print_exclusion_summary(
+    excluded: list[EDLEntry],
+    rules: ExclusionRuleSet,
+    verbose: bool = False
+) -> None:
+    """Print summary statistics about exclusions.
+
+    Shows total excluded and breakdown by rule.
+
+    Args:
+        excluded: List of excluded entries
+        rules: The exclusion rule set
+        verbose: If True, show detailed breakdown by rule
+    """
+    if not excluded:
+        return
+
+    print(f"\nExclusion Summary:")
+    print(f"  Total excluded: {len(excluded)}")
+
+    if verbose:
+        stats = rules.get_exclusion_stats(excluded)
+        print(f"\n  Breakdown by rule:")
+        for rule in rules.rules:
+            count = stats.get(rule.line_number, 0)
+            if count > 0:
+                print(f"    Rule {rule.line_number}: {count} entries")
+                print(f"      \"{rule.text}\"")
 
 
 def save_def_list(
@@ -399,7 +441,9 @@ def convert(
     fps: int = 25,
     collapse: bool = True,
     delimiter: str = ',',
-    exclusion_rules: ExclusionRuleSet | None = None
+    exclusion_rules: ExclusionRuleSet | None = None,
+    verbose: bool = False,
+    verbose_level: int = 1
 ) -> list[DefEntry]:
     """Main conversion function: EDL + Source -> Definitive List.
 
@@ -411,36 +455,50 @@ def convert(
         collapse: Whether to collapse consecutive same-name entries
         delimiter: Output file delimiter
         exclusion_rules: Optional exclusion rules to filter entries before processing
+        verbose: If True, print detailed progress for each entry
+        verbose_level: 1 = basic output, 2 = detailed evaluation traces
 
     Returns:
         List of DefEntry objects that were saved
     """
-    # Load files
+    # Step 1: Load EDL
+    print("Loading EDL file...")
     edl_entries = load_edl(edl_path, fps=fps)
+    print(f"  Loaded {len(edl_entries)} EDL entries")
+
+    # Step 2: Load source
+    print("Loading source file...")
     source_entries = load_source(source_path)
+    print(f"  Loaded {len(source_entries)} source entries")
 
-    print(f"Loaded {len(edl_entries)} EDL entries")
-    print(f"Loaded {len(source_entries)} source entries")
-
-    # Apply exclusion rules (before collapse)
+    # Step 3: Apply exclusion rules (before collapse)
     if exclusion_rules:
-        edl_entries, excluded = filter_edl_entries(edl_entries, exclusion_rules)
-        print(f"Excluded {len(excluded)} entries based on exclusion rules")
+        print(f"Applying {len(exclusion_rules)} exclusion rules...")
+        edl_entries, excluded = filter_edl_entries(
+            edl_entries, exclusion_rules, verbose=verbose, verbose_level=verbose_level
+        )
+        print(f"  Excluded {len(excluded)} entries, {len(edl_entries)} remaining")
 
-    # Collapse EDL if requested
+        # Print summary if verbose
+        if verbose:
+            print_exclusion_summary(excluded, exclusion_rules, verbose=True)
+
+    # Step 4: Collapse EDL if requested
     if collapse:
-        edl_entries = collapse_edl(edl_entries, fps=fps)
-        print(f"Collapsed to {len(edl_entries)} entries")
+        print("Collapsing consecutive entries...")
+        before_count = len(edl_entries)
+        edl_entries = collapse_edl(edl_entries, fps=fps, verbose=verbose)
+        print(f"  Collapsed {before_count} entries to {len(edl_entries)}")
 
-    # Generate DEF list
-    def_list = generate_def_list(edl_entries, source_entries)
-
-    # Count matches
+    # Step 5: Generate DEF list
+    print("Matching EDL entries with sources...")
+    def_list = generate_def_list(edl_entries, source_entries, verbose=verbose)
     matched = sum(1 for d in def_list if d.link)
-    print(f"Matched {matched}/{len(def_list)} entries with sources")
+    print(f"  Matched {matched}/{len(def_list)} entries with sources")
 
-    # Save output
+    # Step 6: Save output
+    print("Saving output...")
     save_def_list(def_list, output_path, delimiter=delimiter)
-    print(f"Saved to {output_path}")
+    print(f"  Saved to {output_path}")
 
     return def_list

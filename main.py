@@ -80,6 +80,13 @@ Examples:
         help="Path to exclusion rules file"
     )
 
+    parser.add_argument(
+        "-v", "--verbose",
+        action="count",
+        default=0,
+        help="Verbosity: -v for basic output, -vv for detailed evaluation traces"
+    )
+
     args = parser.parse_args()
 
     # Validate input files exist
@@ -105,8 +112,9 @@ Examples:
     exclusion_rules = None
     if args.exclude:
         try:
+            print(f"\nLoading exclusion rules from: {args.exclude}")
             exclusion_rules = load_exclusion_rules(args.exclude)
-            print(f"Loaded {len(exclusion_rules)} exclusion rules from: {args.exclude}")
+            print(f"  Loaded {len(exclusion_rules)} exclusion rules\n")
         except ExclusionRuleSyntaxError as e:
             print(f"Error in exclusion rules file: {e}", file=sys.stderr)
             return 1
@@ -117,6 +125,9 @@ Examples:
         print(f"With source: {args.source}")
         print(f"Frame rate: {args.fps} fps")
         print(f"Collapse consecutive: {not args.no_collapse}")
+        if args.verbose > 0:
+            verbose_mode = "basic (-v)" if args.verbose == 1 else "detailed (-vv)" if args.verbose == 2 else f"level {args.verbose}"
+            print(f"Verbose mode: {verbose_mode}")
         print("-" * 40)
 
         convert(
@@ -126,7 +137,9 @@ Examples:
             fps=args.fps,
             collapse=not args.no_collapse,
             delimiter=delimiter,
-            exclusion_rules=exclusion_rules
+            exclusion_rules=exclusion_rules,
+            verbose=args.verbose > 0,
+            verbose_level=args.verbose
         )
 
         print("-" * 40)

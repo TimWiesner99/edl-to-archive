@@ -1,5 +1,8 @@
-# Exclude SYNC files with empty file names
-Bestandsnaam IS "" AND Name INCLUDES "SYNC" AND Name INCLUDES ".MXF"
+# Exclude MXF SYNC files
+Bestandsnaam IS "" AND Name INCLUDES ".MXF.SYNC"
+
+# Exclude MP4 SYNC files
+Bestandsnaam IS "" AND Name INCLUDES ".MP4.SYNC"
 
 # Exclude all files with "exclude" in the name
 Name INCLUDES "exclude"
