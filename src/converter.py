@@ -77,6 +77,7 @@ SOURCE_COLUMN_MAP = {
     "bron": "source",
     "kosten": "cost",
     "rechten / contact": "rights_contact",
+    "rechten/contact": "rights_contact",  # Alternative format
     "to do/opmerkinen": "todo_notes",
     "to do/opmerkingen": "todo_notes",  # Alternative spelling
     "to do": "todo_notes",
@@ -85,7 +86,8 @@ SOURCE_COLUMN_MAP = {
     # Also for DEF format (slightly different column names)
     "tc in": "timecode_in",
     "duur": "duration",
-    "prijs nl": "cost",
+    "prijs nl": "price_nl",
+    "prijs sales": "price_sales",
 }
 
 # English source column names
@@ -190,6 +192,9 @@ def load_source(filepath: Path | str) -> list[SourceEntry]:
 
     Returns:
         List of SourceEntry objects
+
+    Raises:
+        ValueError: If validation fails (e.g., conflicting price fields)
     """
     filepath = Path(filepath)
 
@@ -206,7 +211,7 @@ def load_source(filepath: Path | str) -> list[SourceEntry]:
     df = map_columns(df, [SOURCE_COLUMN_MAP, SOURCE_ENGLISH_MAP])
 
     entries = []
-    for _, row in df.iterrows():
+    for idx, row in df.iterrows():
         row_dict = row.to_dict()
 
         # Skip rows without a name
@@ -214,8 +219,15 @@ def load_source(filepath: Path | str) -> list[SourceEntry]:
         if not name or name.strip() == "":
             continue
 
-        entry = SourceEntry.from_dict(row_dict)
-        entries.append(entry)
+        # Row number for error messages (add 2: 1 for header, 1 for 0-indexing)
+        row_number = idx + 2
+
+        try:
+            entry = SourceEntry.from_dict(row_dict, row_number=row_number)
+            entries.append(entry)
+        except ValueError as e:
+            # Re-raise with file context
+            raise ValueError(f"Error in source file '{filepath.name}': {e}") from e
 
     return entries
 

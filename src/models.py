@@ -66,31 +66,70 @@ class SourceEntry:
     link: str = ""
     source: str = ""
     cost: str = ""
+    price_nl: str = ""
+    price_sales: str = ""
     rights_contact: str = ""
     todo_notes: str = ""
     source_in_frame: str = ""
     credits: str = ""
+    row_number: int = 0  # Track row number for error messages
 
     @classmethod
-    def from_dict(cls, data: dict) -> SourceEntry:
+    def from_dict(cls, data: dict, row_number: int = 0) -> SourceEntry:
         """Create a SourceEntry from a dictionary (typically from a pandas row).
 
         Args:
             data: Dictionary containing source row data
+            row_number: Row number in the source file (for error messages)
 
         Returns:
             SourceEntry instance
+
+        Raises:
+            ValueError: If both price_nl and price_sales are filled with different values
         """
+        # Extract price fields
+        cost = str(data.get("cost", "")).strip()
+        price_nl = str(data.get("price_nl", "")).strip()
+        price_sales = str(data.get("price_sales", "")).strip()
+
+        # Determine final cost value with validation
+        final_cost = ""
+        name = str(data.get("name", ""))
+
+        # Check if both price fields are filled
+        if price_nl and price_sales:
+            if price_nl == price_sales:
+                # Both filled but same value - use it
+                final_cost = price_nl
+            else:
+                # Both filled with different values - error
+                raise ValueError(
+                    f"Both 'Prijs NL' and 'Prijs sales' are filled with different values "
+                    f"for '{name}' at row {row_number}: "
+                    f"Prijs NL='{price_nl}', Prijs sales='{price_sales}'"
+                )
+        elif price_nl:
+            final_cost = price_nl
+        elif price_sales:
+            final_cost = price_sales
+        elif cost:
+            # Fallback to 'kosten' column if neither price field is filled
+            final_cost = cost
+
         return cls(
-            name=str(data.get("name", "")),
+            name=name,
             description=str(data.get("description", "")),
             link=str(data.get("link", "")),
             source=str(data.get("source", "")),
-            cost=str(data.get("cost", "")),
+            cost=final_cost,
+            price_nl=price_nl,
+            price_sales=price_sales,
             rights_contact=str(data.get("rights_contact", "")),
             todo_notes=str(data.get("todo_notes", "")),
             source_in_frame=str(data.get("source_in_frame", "")),
             credits=str(data.get("credits", "")),
+            row_number=row_number,
         )
 
 
@@ -159,7 +198,9 @@ class DefEntry:
                           If False (default), round to seconds (HH:MM:SS).
 
         Returns:
-            Dictionary representation of the entry
+            Dictionary representation of the entry in the new column order:
+            TC in, Duur, Bestandsnaam, Omschrijving, Link, Bron, Kosten,
+            rechten/contact, to do, Bron in beeld, Aftiteling, Bron TC in, Bron TC out
         """
         # Choose formatting method based on include_frames flag
         tc_format = lambda tc: tc.to_string() if include_frames else tc.to_string_rounded()
@@ -171,12 +212,11 @@ class DefEntry:
             "Omschrijving": self.description,
             "Link": self.link,
             "Bron": self.source,
-            "rechten / contact": self.rights_contact,
+            "Kosten": self.cost,
+            "rechten/contact": self.rights_contact,
             "to do": self.todo_notes,
-            "Prijs NL": self.cost,
-            "Prijs sales": "",  # Not in source, kept for format compatibility
             "Bron in beeld": self.source_in_frame,
             "Aftiteling": self.credits,
             "Bron TC in": tc_format(self.source_start) if self.source_start else "",
-            "Bron TC uit": tc_format(self.source_end) if self.source_end else "",
+            "Bron TC out": tc_format(self.source_end) if self.source_end else "",
         }
