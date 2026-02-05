@@ -151,17 +151,22 @@ class DefEntry:
 
         return entry
 
-    def to_dict(self) -> dict:
+    def to_dict(self, include_frames: bool = False) -> dict:
         """Convert DefEntry to dictionary for output.
+
+        Args:
+            include_frames: If True, include frame-level precision in timecodes (HH:MM:SS:FF).
+                          If False (default), round to seconds (HH:MM:SS).
 
         Returns:
             Dictionary representation of the entry
         """
+        # Choose formatting method based on include_frames flag
+        tc_format = lambda tc: tc.to_string() if include_frames else tc.to_string_rounded()
+
         return {
-            "TC in": self.timecode_in.to_string(),
-            "Duur": self.duration.to_string(),
-            "Bron TC in": self.source_start.to_string() if self.source_start else "",
-            "Bron TC uit": self.source_end.to_string() if self.source_end else "",
+            "TC in": tc_format(self.timecode_in),
+            "Duur": tc_format(self.duration),
             "Bestandsnaam": self.name,
             "Omschrijving": self.description,
             "Link": self.link,
@@ -172,4 +177,6 @@ class DefEntry:
             "Prijs sales": "",  # Not in source, kept for format compatibility
             "Bron in beeld": self.source_in_frame,
             "Aftiteling": self.credits,
+            "Bron TC in": tc_format(self.source_start) if self.source_start else "",
+            "Bron TC uit": tc_format(self.source_end) if self.source_end else "",
         }

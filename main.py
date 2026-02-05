@@ -87,6 +87,12 @@ Examples:
         help="Verbosity: -v for basic output, -vv for detailed evaluation traces"
     )
 
+    parser.add_argument(
+        "--frames",
+        action="store_true",
+        help="Include frame-level precision in timecodes (default: round to seconds)"
+    )
+
     args = parser.parse_args()
 
     # Validate input files exist
@@ -139,7 +145,8 @@ Examples:
             delimiter=delimiter,
             exclusion_rules=exclusion_rules,
             verbose=args.verbose > 0,
-            verbose_level=args.verbose
+            verbose_level=args.verbose,
+            include_frames=args.frames
         )
 
         print("-" * 40)

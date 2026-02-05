@@ -415,7 +415,8 @@ def print_exclusion_summary(
 def save_def_list(
     def_list: list[DefEntry],
     output_path: Path | str,
-    delimiter: str = ','
+    delimiter: str = ',',
+    include_frames: bool = False
 ) -> None:
     """Save the definitive list to a CSV file.
 
@@ -423,11 +424,12 @@ def save_def_list(
         def_list: List of DefEntry objects to save
         output_path: Path for the output file
         delimiter: CSV delimiter (default is comma)
+        include_frames: If True, include frame-level precision in timecodes
     """
     output_path = Path(output_path)
 
     # Convert to list of dicts
-    rows = [entry.to_dict() for entry in def_list]
+    rows = [entry.to_dict(include_frames=include_frames) for entry in def_list]
 
     # Create DataFrame and save
     df = pd.DataFrame(rows)
@@ -443,7 +445,8 @@ def convert(
     delimiter: str = ',',
     exclusion_rules: ExclusionRuleSet | None = None,
     verbose: bool = False,
-    verbose_level: int = 1
+    verbose_level: int = 1,
+    include_frames: bool = False
 ) -> list[DefEntry]:
     """Main conversion function: EDL + Source -> Definitive List.
 
@@ -457,6 +460,7 @@ def convert(
         exclusion_rules: Optional exclusion rules to filter entries before processing
         verbose: If True, print detailed progress for each entry
         verbose_level: 1 = basic output, 2 = detailed evaluation traces
+        include_frames: If True, include frame-level precision in output timecodes
 
     Returns:
         List of DefEntry objects that were saved
@@ -498,7 +502,7 @@ def convert(
 
     # Step 6: Save output
     print("Saving output...")
-    save_def_list(def_list, output_path, delimiter=delimiter)
+    save_def_list(def_list, output_path, delimiter=delimiter, include_frames=include_frames)
     print(f"  Saved to {output_path}")
 
     return def_list

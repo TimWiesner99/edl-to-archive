@@ -103,6 +103,40 @@ class Timecode:
         """
         return f"{self.hours:02d}:{self.minutes:02d}:{self.seconds:02d}:{self.frames:02d}"
 
+    def round_to_seconds(self) -> Timecode:
+        """Round timecode to the nearest second.
+
+        Rounds up if frames >= fps/2, otherwise rounds down.
+
+        Returns:
+            New Timecode rounded to the nearest second (frames = 0)
+        """
+        # Round up if we're at or past the halfway point
+        if self.frames >= self.fps / 2:
+            # Add one second and zero out frames
+            total_frames = self.to_frames() + (self.fps - self.frames)
+            return Timecode.from_frames(total_frames, self.fps)
+        else:
+            # Just zero out the frames (round down)
+            return Timecode(
+                hours=self.hours,
+                minutes=self.minutes,
+                seconds=self.seconds,
+                frames=0,
+                fps=self.fps
+            )
+
+    def to_string_rounded(self) -> str:
+        """Convert timecode to string format HH:MM:SS (without frames).
+
+        Rounds to the nearest second before formatting.
+
+        Returns:
+            Formatted timecode string without frame count
+        """
+        rounded = self.round_to_seconds()
+        return f"{rounded.hours:02d}:{rounded.minutes:02d}:{rounded.seconds:02d}"
+
     def __str__(self) -> str:
         """String representation of the timecode."""
         return self.to_string()
