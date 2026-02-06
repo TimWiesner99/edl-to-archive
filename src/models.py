@@ -223,8 +223,8 @@ class DefEntry:
 
 
 @dataclass
-class DefInladenEntry:
-    """Represents an aggregated entry for the DEF_INLADEN output.
+class DefSourcesEntry:
+    """Represents an aggregated entry for the DEF_SOURCES output.
 
     Groups all DEF entries by filename, combining timecodes and counting occurrences.
     """
@@ -246,7 +246,7 @@ class DefInladenEntry:
     source_total_usage: Optional[Timecode] = None  # Sum of individual (Bron TC out - Bron TC in)
 
     def to_dict(self, include_frames: bool = False) -> dict:
-        """Convert DefInladenEntry to dictionary for output.
+        """Convert DefSourcesEntry to dictionary for output.
 
         Args:
             include_frames: If True, include frame-level precision in timecodes (HH:MM:SS:FF).

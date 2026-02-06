@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from .timecode import Timecode
-from .models import EDLEntry, SourceEntry, DefEntry, DefInladenEntry
+from .models import EDLEntry, SourceEntry, DefEntry, DefSourcesEntry
 from .exclusion import ExclusionRuleSet, filter_edl_entries
 
 
@@ -232,6 +232,122 @@ def load_source(filepath: Path | str) -> list[SourceEntry]:
     return entries
 
 
+def validate_edl_file(filepath: Path | str, fps: int = 25) -> list[str]:
+    """Validate an EDL file has correct format and parseable content.
+
+    Checks:
+    - File is not empty (beyond headers)
+    - Required columns are present after mapping
+    - Timecodes are parseable
+
+    Args:
+        filepath: Path to the EDL CSV file
+        fps: Frame rate for timecode validation
+
+    Returns:
+        List of error messages (empty if valid)
+    """
+    filepath = Path(filepath)
+    errors = []
+
+    try:
+        content, encoding = read_file_with_encoding(filepath)
+    except UnicodeDecodeError:
+        return ["Could not read file with any supported encoding."]
+
+    lines = [l for l in content.strip().split('\n') if l.strip()]
+    if len(lines) < 1:
+        return ["File is empty."]
+
+    first_line = lines[0]
+    delimiter = '\t' if '\t' in first_line else ','
+
+    try:
+        df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
+    except Exception as e:
+        return [f"Could not parse CSV: {e}"]
+
+    df = df.fillna("")
+    df = map_columns(df, [EDL_COLUMN_MAP, EDL_DUTCH_MAP])
+
+    # Check required columns
+    required = ["name", "timecode_in", "timecode_out", "duration", "source_start", "source_end"]
+    mapped_cols = set(df.columns)
+    missing = [col for col in required if col not in mapped_cols]
+    if missing:
+        errors.append(f"Missing required columns: {', '.join(missing)}")
+        errors.append(f"  Found columns: {', '.join(df.columns.tolist())}")
+        return errors
+
+    # Check for data rows
+    data_rows = df[df["name"].str.strip() != ""]
+    if len(data_rows) == 0:
+        errors.append("No data rows found (all 'Name' fields are empty).")
+        return errors
+
+    # Validate timecodes on first few rows
+    tc_cols = ["timecode_in", "timecode_out", "duration", "source_start", "source_end"]
+    for idx, row in data_rows.head(5).iterrows():
+        for col in tc_cols:
+            val = str(row.get(col, "")).strip()
+            if val and val != "00:00:00:00":
+                if not Timecode.TIMECODE_PATTERN.match(val):
+                    errors.append(f"Row {idx + 2}, column '{col}': invalid timecode format '{val}' (expected HH:MM:SS:FF)")
+
+    return errors
+
+
+def validate_source_file(filepath: Path | str) -> list[str]:
+    """Validate a source file has correct format and content.
+
+    Checks:
+    - File is not empty (beyond headers)
+    - Required 'name'/'Bestandsnaam' column is present
+
+    Args:
+        filepath: Path to the source CSV file
+
+    Returns:
+        List of error messages (empty if valid)
+    """
+    filepath = Path(filepath)
+    errors = []
+
+    try:
+        content, encoding = read_file_with_encoding(filepath)
+    except UnicodeDecodeError:
+        return ["Could not read file with any supported encoding."]
+
+    lines = [l for l in content.strip().split('\n') if l.strip()]
+    if len(lines) < 1:
+        return ["File is empty."]
+
+    first_line = lines[0]
+    delimiter = '\t' if '\t' in first_line else ','
+
+    try:
+        df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
+    except Exception as e:
+        return [f"Could not parse CSV: {e}"]
+
+    df = df.fillna("")
+    df = map_columns(df, [SOURCE_COLUMN_MAP, SOURCE_ENGLISH_MAP])
+
+    # Check required column
+    if "name" not in df.columns:
+        errors.append("Missing required column: 'Bestandsnaam' (or 'name')")
+        errors.append(f"  Found columns: {', '.join(df.columns.tolist())}")
+        return errors
+
+    # Check for data rows
+    data_rows = df[df["name"].str.strip() != ""]
+    if len(data_rows) == 0:
+        errors.append("No data rows found (all 'Bestandsnaam' fields are empty).")
+        return errors
+
+    return errors
+
+
 def normalize_name(name: str) -> str:
     """Normalize a file name for matching.
 
@@ -451,8 +567,8 @@ def save_def_list(
 def aggregate_def_list(
     def_list: list[DefEntry],
     fps: int = 25
-) -> list[DefInladenEntry]:
-    """Aggregate DEF entries by unique filename for the DEF_INLADEN output.
+) -> list[DefSourcesEntry]:
+    """Aggregate DEF entries by unique filename for the DEF_SOURCES output.
 
     Groups entries by name, combining timecodes and counting occurrences:
     - TC in: earliest (smallest) timecode
@@ -468,7 +584,7 @@ def aggregate_def_list(
         fps: Frame rate for timecode operations
 
     Returns:
-        List of DefInladenEntry objects, one per unique filename
+        List of DefSourcesEntry objects, one per unique filename
     """
     from collections import OrderedDict
 
@@ -510,7 +626,7 @@ def aggregate_def_list(
                 total_source_usage = total_source_usage + individual_usage
                 has_source_usage = True
 
-        result.append(DefInladenEntry(
+        result.append(DefSourcesEntry(
             name=name,
             timecode_in=min_tc_in,
             duration=total_duration,
@@ -531,23 +647,23 @@ def aggregate_def_list(
     return result
 
 
-def save_def_inladen_list(
-    inladen_list: list[DefInladenEntry],
+def save_def_sources_list(
+    sources_list: list[DefSourcesEntry],
     output_path: Path | str,
     delimiter: str = ',',
     include_frames: bool = False
 ) -> None:
-    """Save the DEF_INLADEN list to a CSV file.
+    """Save the DEF_SOURCES list to a CSV file.
 
     Args:
-        inladen_list: List of DefInladenEntry objects to save
+        sources_list: List of DefSourcesEntry objects to save
         output_path: Path for the output file
         delimiter: CSV delimiter (default is comma)
         include_frames: If True, include frame-level precision in timecodes
     """
     output_path = Path(output_path)
 
-    rows = [entry.to_dict(include_frames=include_frames) for entry in inladen_list]
+    rows = [entry.to_dict(include_frames=include_frames) for entry in sources_list]
 
     df = pd.DataFrame(rows)
     df.to_csv(output_path, sep=delimiter, index=False)
@@ -622,15 +738,15 @@ def convert(
     save_def_list(def_list, output_path, delimiter=delimiter, include_frames=include_frames)
     print(f"  Saved DEF list to {output_path}")
 
-    # Step 7: Generate and save DEF_INLADEN output
-    print("Generating DEF_INLADEN (aggregated by filename)...")
-    inladen_list = aggregate_def_list(def_list, fps=fps)
-    print(f"  Aggregated {len(def_list)} entries into {len(inladen_list)} unique files")
+    # Step 7: Generate and save DEF_SOURCES output
+    print("Generating DEF_SOURCES (aggregated by filename)...")
+    sources_list = aggregate_def_list(def_list, fps=fps)
+    print(f"  Aggregated {len(def_list)} entries into {len(sources_list)} unique files")
 
-    # Derive DEF_INLADEN output path from the main output path
+    # Derive DEF_SOURCES output path from the main output path
     output_path = Path(output_path)
-    inladen_path = output_path.parent / f"{output_path.stem}_INLADEN{output_path.suffix}"
-    save_def_inladen_list(inladen_list, inladen_path, delimiter=delimiter, include_frames=include_frames)
-    print(f"  Saved DEF_INLADEN list to {inladen_path}")
+    sources_path = output_path.parent / f"{output_path.stem}_SOURCES{output_path.suffix}"
+    save_def_sources_list(sources_list, sources_path, delimiter=delimiter, include_frames=include_frames)
+    print(f"  Saved DEF_SOURCES list to {sources_path}")
 
     return def_list
