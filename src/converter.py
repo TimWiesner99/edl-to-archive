@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from .timecode import Timecode
-from .models import EDLEntry, SourceEntry, DefEntry
+from .models import EDLEntry, SourceEntry, DefEntry, DefInladenEntry
 from .exclusion import ExclusionRuleSet, filter_edl_entries
 
 
@@ -448,6 +448,111 @@ def save_def_list(
     df.to_csv(output_path, sep=delimiter, index=False)
 
 
+def aggregate_def_list(
+    def_list: list[DefEntry],
+    fps: int = 25
+) -> list[DefInladenEntry]:
+    """Aggregate DEF entries by unique filename for the DEF_INLADEN output.
+
+    Groups entries by name, combining timecodes and counting occurrences:
+    - TC in: earliest (smallest) timecode
+    - Duur: sum of all durations
+    - Aantal: number of occurrences
+    - Bron TC in: earliest source timecode in
+    - Bron TC out: latest source timecode out
+    - Bron gebruik totaal: sum of individual (Bron TC out - Bron TC in) durations
+    - Other metadata fields: taken from the first occurrence (same for all)
+
+    Args:
+        def_list: List of DefEntry objects
+        fps: Frame rate for timecode operations
+
+    Returns:
+        List of DefInladenEntry objects, one per unique filename
+    """
+    from collections import OrderedDict
+
+    groups: OrderedDict[str, list[DefEntry]] = OrderedDict()
+    for entry in def_list:
+        if entry.name not in groups:
+            groups[entry.name] = []
+        groups[entry.name].append(entry)
+
+    result = []
+    for name, entries in groups.items():
+        first = entries[0]
+
+        # TC in: smallest (earliest) timecode_in
+        min_tc_in = min(e.timecode_in for e in entries)
+
+        # Duur: sum of all durations
+        total_duration = Timecode.from_frames(0, fps)
+        for e in entries:
+            total_duration = total_duration + e.duration
+
+        # Count
+        count = len(entries)
+
+        # Bron TC in: earliest source_start (smallest)
+        source_starts = [e.source_start for e in entries if e.source_start is not None]
+        min_source_start = min(source_starts) if source_starts else None
+
+        # Bron TC out: latest source_end (largest)
+        source_ends = [e.source_end for e in entries if e.source_end is not None]
+        max_source_end = max(source_ends) if source_ends else None
+
+        # Bron gebruik totaal: sum of individual (source_end - source_start) durations
+        total_source_usage = Timecode.from_frames(0, fps)
+        has_source_usage = False
+        for e in entries:
+            if e.source_start is not None and e.source_end is not None:
+                individual_usage = e.source_end - e.source_start
+                total_source_usage = total_source_usage + individual_usage
+                has_source_usage = True
+
+        result.append(DefInladenEntry(
+            name=name,
+            timecode_in=min_tc_in,
+            duration=total_duration,
+            count=count,
+            description=first.description,
+            link=first.link,
+            source=first.source,
+            cost=first.cost,
+            rights_contact=first.rights_contact,
+            todo_notes=first.todo_notes,
+            source_in_frame=first.source_in_frame,
+            credits=first.credits,
+            source_start=min_source_start,
+            source_end=max_source_end,
+            source_total_usage=total_source_usage if has_source_usage else None,
+        ))
+
+    return result
+
+
+def save_def_inladen_list(
+    inladen_list: list[DefInladenEntry],
+    output_path: Path | str,
+    delimiter: str = ',',
+    include_frames: bool = False
+) -> None:
+    """Save the DEF_INLADEN list to a CSV file.
+
+    Args:
+        inladen_list: List of DefInladenEntry objects to save
+        output_path: Path for the output file
+        delimiter: CSV delimiter (default is comma)
+        include_frames: If True, include frame-level precision in timecodes
+    """
+    output_path = Path(output_path)
+
+    rows = [entry.to_dict(include_frames=include_frames) for entry in inladen_list]
+
+    df = pd.DataFrame(rows)
+    df.to_csv(output_path, sep=delimiter, index=False)
+
+
 def convert(
     edl_path: Path | str,
     source_path: Path | str,
@@ -512,9 +617,20 @@ def convert(
     matched = sum(1 for d in def_list if d.link)
     print(f"  Matched {matched}/{len(def_list)} entries with sources")
 
-    # Step 6: Save output
+    # Step 6: Save DEF output
     print("Saving output...")
     save_def_list(def_list, output_path, delimiter=delimiter, include_frames=include_frames)
-    print(f"  Saved to {output_path}")
+    print(f"  Saved DEF list to {output_path}")
+
+    # Step 7: Generate and save DEF_INLADEN output
+    print("Generating DEF_INLADEN (aggregated by filename)...")
+    inladen_list = aggregate_def_list(def_list, fps=fps)
+    print(f"  Aggregated {len(def_list)} entries into {len(inladen_list)} unique files")
+
+    # Derive DEF_INLADEN output path from the main output path
+    output_path = Path(output_path)
+    inladen_path = output_path.parent / f"{output_path.stem}_INLADEN{output_path.suffix}"
+    save_def_inladen_list(inladen_list, inladen_path, delimiter=delimiter, include_frames=include_frames)
+    print(f"  Saved DEF_INLADEN list to {inladen_path}")
 
     return def_list
