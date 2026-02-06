@@ -669,6 +669,68 @@ def save_def_sources_list(
     df.to_csv(output_path, sep=delimiter, index=False)
 
 
+def read_raw_csv(filepath: Path | str) -> pd.DataFrame:
+    """Read a CSV file as-is, preserving original column names and data.
+
+    Args:
+        filepath: Path to the CSV file
+
+    Returns:
+        DataFrame with original column names and string data
+    """
+    filepath = Path(filepath)
+    content, encoding = read_file_with_encoding(filepath)
+    first_line = content.split('\n')[0] if content else ''
+    delimiter = '\t' if '\t' in first_line else ','
+    df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
+    df = df.fillna("")
+    return df
+
+
+def save_excel_output(
+    edl_path: Path | str,
+    source_path: Path | str,
+    def_list: list[DefEntry],
+    sources_list: list[DefSourcesEntry],
+    output_path: Path | str,
+    include_frames: bool = False
+) -> None:
+    """Save all data to a single Excel file with four sheets.
+
+    Sheets:
+    - SOURCE: Original source archive list
+    - EDL: Original edit decision list
+    - DEF: Definitive archive list
+    - DEF_SOURCES: Aggregated sources list
+
+    Args:
+        edl_path: Path to the original EDL CSV file
+        source_path: Path to the original source CSV file
+        def_list: List of DefEntry objects
+        sources_list: List of DefSourcesEntry objects
+        output_path: Path for the output Excel file (.xlsx)
+        include_frames: If True, include frame-level precision in timecodes
+    """
+    output_path = Path(output_path)
+
+    # Read raw input files
+    edl_raw = read_raw_csv(edl_path)
+    source_raw = read_raw_csv(source_path)
+
+    # Build DEF and DEF_SOURCES DataFrames
+    def_rows = [entry.to_dict(include_frames=include_frames) for entry in def_list]
+    def_df = pd.DataFrame(def_rows)
+
+    sources_rows = [entry.to_dict(include_frames=include_frames) for entry in sources_list]
+    sources_df = pd.DataFrame(sources_rows)
+
+    with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
+        source_raw.to_excel(writer, sheet_name="SOURCE", index=False)
+        edl_raw.to_excel(writer, sheet_name="EDL", index=False)
+        def_df.to_excel(writer, sheet_name="DEF", index=False)
+        sources_df.to_excel(writer, sheet_name="DEF_SOURCES", index=False)
+
+
 def convert(
     edl_path: Path | str,
     source_path: Path | str,
@@ -748,5 +810,18 @@ def convert(
     sources_path = output_path.parent / f"{output_path.stem}_SOURCES{output_path.suffix}"
     save_def_sources_list(sources_list, sources_path, delimiter=delimiter, include_frames=include_frames)
     print(f"  Saved DEF_SOURCES list to {sources_path}")
+
+    # Step 8: Save combined Excel output
+    excel_path = output_path.parent / f"{output_path.stem}.xlsx"
+    print("Saving Excel output...")
+    save_excel_output(
+        edl_path=edl_path,
+        source_path=source_path,
+        def_list=def_list,
+        sources_list=sources_list,
+        output_path=excel_path,
+        include_frames=include_frames,
+    )
+    print(f"  Saved Excel file to {excel_path}")
 
     return def_list
