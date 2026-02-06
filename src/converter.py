@@ -410,11 +410,17 @@ def collapse_edl(entries: list[EDLEntry], fps: int = 25, verbose: bool = False) 
 
             # Calculate combined values
             combined_duration = Timecode.from_frames(0, fps)
+            source_usage_sum = Timecode.from_frames(0, fps)
             min_source_start = group[0].source_start
             max_source_end = group[0].source_end
 
             for entry in group:
                 combined_duration = combined_duration + entry.duration
+                # Accumulate each individual source usage (preserving actual durations)
+                if entry.source_total_usage is not None:
+                    source_usage_sum = source_usage_sum + entry.source_total_usage
+                else:
+                    source_usage_sum = source_usage_sum + (entry.source_end - entry.source_start)
                 if entry.source_start < min_source_start:
                     min_source_start = entry.source_start
                 if entry.source_end > max_source_end:
@@ -434,6 +440,7 @@ def collapse_edl(entries: list[EDLEntry], fps: int = 25, verbose: bool = False) 
                 track=current.track,
                 audio_channels=current.audio_channels,
                 comment=current.comment,
+                source_total_usage=source_usage_sum,
             )
             collapsed.append(combined)
         else:
@@ -576,7 +583,7 @@ def aggregate_def_list(
     - Aantal: number of occurrences
     - Bron TC in: earliest source timecode in
     - Bron TC out: latest source timecode out
-    - Bron gebruik totaal: sum of individual (Bron TC out - Bron TC in) durations
+    - Bron gebruik totaal: sum of actual source durations (using pre-computed values from collapse when available)
     - Other metadata fields: taken from the first occurrence (same for all)
 
     Args:
@@ -617,11 +624,16 @@ def aggregate_def_list(
         source_ends = [e.source_end for e in entries if e.source_end is not None]
         max_source_end = max(source_ends) if source_ends else None
 
-        # Bron gebruik totaal: sum of individual (source_end - source_start) durations
+        # Bron gebruik totaal: sum of individual source durations
+        # Use pre-computed source_total_usage (from collapse) when available,
+        # otherwise fall back to (source_end - source_start) for non-collapsed entries
         total_source_usage = Timecode.from_frames(0, fps)
         has_source_usage = False
         for e in entries:
-            if e.source_start is not None and e.source_end is not None:
+            if e.source_total_usage is not None:
+                total_source_usage = total_source_usage + e.source_total_usage
+                has_source_usage = True
+            elif e.source_start is not None and e.source_end is not None:
                 individual_usage = e.source_end - e.source_start
                 total_source_usage = total_source_usage + individual_usage
                 has_source_usage = True

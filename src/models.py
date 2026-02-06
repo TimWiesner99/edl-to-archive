@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 
 from .timecode import Timecode
 
@@ -26,6 +26,7 @@ class EDLEntry:
     track: str = ""
     audio_channels: str = ""
     comment: str = ""
+    source_total_usage: Optional[Timecode] = None  # Pre-computed sum of source durations (set by collapse)
 
     @classmethod
     def from_dict(cls, data: dict, fps: int = 25) -> EDLEntry:
@@ -154,6 +155,7 @@ class DefEntry:
     # Additional fields from combining
     source_start: Optional[Timecode] = None
     source_end: Optional[Timecode] = None
+    source_total_usage: Optional[Timecode] = None  # Pre-computed sum of source durations (from collapse)
 
     @classmethod
     def from_edl_and_source(
@@ -176,6 +178,7 @@ class DefEntry:
             duration=edl.duration,
             source_start=edl.source_start,
             source_end=edl.source_end,
+            source_total_usage=edl.source_total_usage,
         )
 
         if source:
