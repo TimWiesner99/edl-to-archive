@@ -26,9 +26,9 @@ DEFAULT_EDL_PATH = DEFAULT_INPUT_DIR / "EDL.csv"
 DEFAULT_SOURCE_PATH = DEFAULT_INPUT_DIR / "SOURCE.csv"
 DEFAULT_OUTPUT_PATH = Path("output") / "DEF.csv"
 
-# Template headers (tab-delimited, matching expected input formats)
-EDL_TEMPLATE_HEADER = "ID\tReel\tName\tFile Name\tTrack\tTimecode In\tTimecode Out\tDuration\tSource Start\tSource End\tAudio Channels\tComment\n"
-SOURCE_TEMPLATE_HEADER = "Bestandsnaam\tOmschrijving\tLink\tBron\tkosten\trechten / contact\tto do\tBron in beeld\tAftiteling\n"
+# Template headers (comma-delimited CSV format)
+EDL_TEMPLATE_HEADER = "ID,Reel,Name,File Name,Track,Timecode In,Timecode Out,Duration,Source Start,Source End,Audio Channels,Comment\n"
+SOURCE_TEMPLATE_HEADER = "TC in,Duur,Bestandsnaam,Omschrijving,Link,Bron,kosten,rechten / contact,to do,Bron in beeld,Aftiteling\n"
 
 
 def open_file_in_default_app(filepath: Path) -> bool:
@@ -69,7 +69,17 @@ def create_template_file(filepath: Path, header: str) -> bool:
 
     # If file exists and has content beyond the header, don't overwrite
     if filepath.exists():
-        content = filepath.read_text(encoding="utf-8").strip()
+        # Try UTF-8 first, fall back to Windows-1252 (common on Windows)
+        for encoding in ("utf-8", "cp1252"):
+            try:
+                content = filepath.read_text(encoding=encoding).strip()
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            # If all encodings fail, read with error replacement
+            content = filepath.read_text(encoding="utf-8", errors="replace").strip()
+
         if content and content != header.strip():
             return False
 
@@ -334,6 +344,13 @@ Examples:
 
         print("-" * 40)
         print("Conversion complete!")
+
+        # Open the Excel output file
+        excel_path = output_path.parent / f"{output_path.stem}.xlsx"
+        if excel_path.exists():
+            print(f"\nOpening {excel_path}...")
+            open_file_in_default_app(excel_path)
+
         return 0
 
     except Exception as e:

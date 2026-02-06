@@ -742,6 +742,62 @@ def save_excel_output(
         def_df.to_excel(writer, sheet_name="DEF", index=False)
         sources_df.to_excel(writer, sheet_name="DEF_SOURCES", index=False)
 
+        workbook = writer.book
+
+        # Define formats
+        header_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#B8CCE4',  # Light blue
+        })
+        currency_format = workbook.add_format({
+            'num_format': '€ #,##0',  # Euro, no decimals
+        })
+        currency_header_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#B8CCE4',
+            'num_format': '€ #,##0',
+        })
+
+        # Apply header formatting to all sheets
+        for sheet_name, df in [
+            ("SOURCE", source_raw),
+            ("EDL", edl_raw),
+            ("DEF", def_df),
+            ("DEF_SOURCES", sources_df),
+        ]:
+            worksheet = writer.sheets[sheet_name]
+            for col_num, col_name in enumerate(df.columns):
+                worksheet.write(0, col_num, col_name, header_format)
+
+        # Format Kosten column as numbers in DEF and DEF_SOURCES sheets
+        for sheet_name, df in [("DEF", def_df), ("DEF_SOURCES", sources_df)]:
+            if "Kosten" in df.columns:
+                worksheet = writer.sheets[sheet_name]
+                kosten_col = df.columns.get_loc("Kosten")
+                for row_num, value in enumerate(df["Kosten"], start=1):
+                    # Parse string to number, removing currency symbols and whitespace
+                    if value and str(value).strip():
+                        clean_value = str(value).replace('€', '').replace(',', '.').strip()
+                        try:
+                            num_value = float(clean_value)
+                            worksheet.write_number(row_num, kosten_col, num_value, currency_format)
+                        except ValueError:
+                            # Keep as string if not parseable
+                            worksheet.write(row_num, kosten_col, value)
+
+        # Add Kosten sum to DEF_SOURCES sheet
+        if "Kosten" in sources_df.columns:
+            sources_sheet = writer.sheets["DEF_SOURCES"]
+            kosten_col = sources_df.columns.get_loc("Kosten")
+            data_rows = len(sources_df)
+            # Sum row: 3 rows below last data (row 0 is header, so last data is at row data_rows)
+            sum_row = data_rows + 1 + 3  # +1 for header, +3 for empty rows
+            # Excel formula uses 1-based row numbers; data starts at row 2
+            sum_formula = f"=SUM({chr(65 + kosten_col)}2:{chr(65 + kosten_col)}{data_rows + 1})"
+            # Add "Kosten totaal" label to the left of the sum cell
+            sources_sheet.write(sum_row, kosten_col - 1, "Kosten totaal", header_format)
+            sources_sheet.write_formula(sum_row, kosten_col, sum_formula, currency_header_format)
+
 
 def convert(
     edl_path: Path | str,
