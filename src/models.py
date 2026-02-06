@@ -220,3 +220,60 @@ class DefEntry:
             "Bron TC in": tc_format(self.source_start) if self.source_start else "",
             "Bron TC out": tc_format(self.source_end) if self.source_end else "",
         }
+
+
+@dataclass
+class DefInladenEntry:
+    """Represents an aggregated entry for the DEF_INLADEN output.
+
+    Groups all DEF entries by filename, combining timecodes and counting occurrences.
+    """
+
+    name: str
+    timecode_in: Timecode          # Earliest TC in across all occurrences
+    duration: Timecode             # Sum of all durations
+    count: int                     # Number of occurrences
+    description: str = ""
+    link: str = ""
+    source: str = ""
+    cost: str = ""
+    rights_contact: str = ""
+    todo_notes: str = ""
+    source_in_frame: str = ""
+    credits: str = ""
+    source_start: Optional[Timecode] = None   # Earliest Bron TC in
+    source_end: Optional[Timecode] = None     # Latest Bron TC out
+    source_total_usage: Optional[Timecode] = None  # Sum of individual (Bron TC out - Bron TC in)
+
+    def to_dict(self, include_frames: bool = False) -> dict:
+        """Convert DefInladenEntry to dictionary for output.
+
+        Args:
+            include_frames: If True, include frame-level precision in timecodes (HH:MM:SS:FF).
+                          If False (default), round to seconds (HH:MM:SS).
+
+        Returns:
+            Dictionary representation with columns:
+            TC in, Duur, Aantal, Bestandsnaam, Omschrijving, Link, Bron, Kosten,
+            rechten/contact, to do, Bron in beeld, Aftiteling,
+            Bron TC in, Bron TC out, Bron gebruik totaal
+        """
+        tc_format = lambda tc: tc.to_string() if include_frames else tc.to_string_rounded()
+
+        return {
+            "TC in": tc_format(self.timecode_in),
+            "Duur": tc_format(self.duration),
+            "Aantal": self.count,
+            "Bestandsnaam": self.name,
+            "Omschrijving": self.description,
+            "Link": self.link,
+            "Bron": self.source,
+            "Kosten": self.cost,
+            "rechten/contact": self.rights_contact,
+            "to do": self.todo_notes,
+            "Bron in beeld": self.source_in_frame,
+            "Aftiteling": self.credits,
+            "Bron TC in": tc_format(self.source_start) if self.source_start else "",
+            "Bron TC out": tc_format(self.source_end) if self.source_end else "",
+            "Bron gebruik totaal": tc_format(self.source_total_usage) if self.source_total_usage else "",
+        }
