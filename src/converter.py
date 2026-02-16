@@ -367,6 +367,29 @@ def normalize_name(name: str) -> str:
     return name.lower().strip()
 
 
+def safe_source_usage(source_start: Timecode, source_end: Timecode, fps: int = 25) -> Timecode:
+    """Calculate source usage duration with a minimum of 1 second.
+
+    When source timecodes have been clamped due to framerate mismatch (e.g. 50fps
+    source in a 25fps project), source_end can end up less than source_start for
+    very short clips within the same second. In that case, return 1 second as the
+    minimum duration rather than crashing.
+
+    Args:
+        source_start: Source start timecode
+        source_end: Source end timecode
+        fps: Frame rate
+
+    Returns:
+        Duration timecode (minimum 1 second)
+    """
+    diff_frames = source_end.to_frames() - source_start.to_frames()
+    if diff_frames < fps:
+        # Less than 1 second (or negative) — use 1 second minimum
+        return Timecode.from_frames(fps, fps)
+    return Timecode.from_frames(diff_frames, fps)
+
+
 def collapse_edl(entries: list[EDLEntry], fps: int = 25, verbose: bool = False) -> list[EDLEntry]:
     """Collapse consecutive EDL entries with the same name.
 
@@ -420,7 +443,7 @@ def collapse_edl(entries: list[EDLEntry], fps: int = 25, verbose: bool = False) 
                 if entry.source_total_usage is not None:
                     source_usage_sum = source_usage_sum + entry.source_total_usage
                 else:
-                    source_usage_sum = source_usage_sum + (entry.source_end - entry.source_start)
+                    source_usage_sum = source_usage_sum + safe_source_usage(entry.source_start, entry.source_end, fps)
                 if entry.source_start < min_source_start:
                     min_source_start = entry.source_start
                 if entry.source_end > max_source_end:
@@ -634,7 +657,7 @@ def aggregate_def_list(
                 total_source_usage = total_source_usage + e.source_total_usage
                 has_source_usage = True
             elif e.source_start is not None and e.source_end is not None:
-                individual_usage = e.source_end - e.source_start
+                individual_usage = safe_source_usage(e.source_start, e.source_end, fps)
                 total_source_usage = total_source_usage + individual_usage
                 has_source_usage = True
 

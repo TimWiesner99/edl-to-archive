@@ -5,7 +5,8 @@
       "Bash(python main.py:*)",
       "Bash(.venv\\\\Scripts\\\\python.exe:*)",
       "Bash(.venv/Scripts/python.exe:*)",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "Bash(uv run:*)"
     ]
   }
 }
