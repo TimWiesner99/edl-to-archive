@@ -57,6 +57,14 @@ class Timecode:
             raise ValueError(f"Invalid timecode format: '{tc_string}'. Expected HH:MM:SS:FF")
 
         hours, minutes, seconds, frames = map(int, match.groups())
+
+        # Handle framerate mismatch: source material may have a higher
+        # framerate than the project (e.g., 50fps source in a 25fps project).
+        # Round down to the current second since exact frames are not needed
+        # for archival purposes.
+        if frames >= fps:
+            frames = 0
+
         return cls(hours=hours, minutes=minutes, seconds=seconds, frames=frames, fps=fps)
 
     @classmethod
