@@ -5,4 +5,10 @@ Bestandsnaam IS "" AND Name INCLUDES ".MXF.SYNC"
 Bestandsnaam IS "" AND Name INCLUDES ".MP4.SYNC"
 
 # Exclude all files with "exclude" in the name
-Name INCLUDES "exclude"
+# Name INCLUDES "exclude"
+
+# Exclude IJSLAND footage
+Name includes "IJSLAND" AND Name includes ".MXF"
+
+# Exclude IJSLAND footage
+(Name includes "A0" OR Name includes "B0") AND Name includes ".MXF"
