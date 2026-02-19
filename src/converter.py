@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from .timecode import Timecode
-from .models import EDLEntry, SourceEntry, DefEntry, DefSourcesEntry
+from .models import EDLEntry, SourceEntry, DefEntry
 from .exclusion import ExclusionRuleSet, filter_edl_entries
 
 
@@ -540,6 +540,34 @@ def generate_def_list(
     return def_list
 
 
+def annotate_occurrences(def_list: list[DefEntry]) -> None:
+    """Annotate each DefEntry with its occurrence number and total occurrences.
+
+    After annotation, each entry knows how many times its source appears in total
+    and which occurrence it is (1-based). This is used to:
+    - Show "Nummer/aantal" (e.g. "2/4") in the output
+    - Show cost only on first occurrence, "zie boven" on subsequent
+
+    Modifies entries in place.
+
+    Args:
+        def_list: List of DefEntry objects to annotate
+    """
+    from collections import Counter
+
+    # Count total occurrences of each name
+    name_counts = Counter(entry.name for entry in def_list)
+
+    # Track current occurrence number per name
+    current_occurrence: dict[str, int] = {}
+
+    for entry in def_list:
+        name = entry.name
+        current_occurrence[name] = current_occurrence.get(name, 0) + 1
+        entry.occurrence_number = current_occurrence[name]
+        entry.total_occurrences = name_counts[name]
+
+
 def print_exclusion_summary(
     excluded: list[EDLEntry],
     rules: ExclusionRuleSet,
@@ -594,116 +622,6 @@ def save_def_list(
     df.to_csv(output_path, sep=delimiter, index=False)
 
 
-def aggregate_def_list(
-    def_list: list[DefEntry],
-    fps: int = 25
-) -> list[DefSourcesEntry]:
-    """Aggregate DEF entries by unique filename for the DEF_SOURCES output.
-
-    Groups entries by name, combining timecodes and counting occurrences:
-    - TC in: earliest (smallest) timecode
-    - Duur: sum of all durations
-    - Aantal: number of occurrences
-    - Bron TC in: earliest source timecode in
-    - Bron TC out: latest source timecode out
-    - Bron gebruik totaal: sum of actual source durations (using pre-computed values from collapse when available)
-    - Other metadata fields: taken from the first occurrence (same for all)
-
-    Args:
-        def_list: List of DefEntry objects
-        fps: Frame rate for timecode operations
-
-    Returns:
-        List of DefSourcesEntry objects, one per unique filename
-    """
-    from collections import OrderedDict
-
-    groups: OrderedDict[str, list[DefEntry]] = OrderedDict()
-    for entry in def_list:
-        if entry.name not in groups:
-            groups[entry.name] = []
-        groups[entry.name].append(entry)
-
-    result = []
-    for name, entries in groups.items():
-        first = entries[0]
-
-        # TC in: smallest (earliest) timecode_in
-        min_tc_in = min(e.timecode_in for e in entries)
-
-        # Duur: sum of all durations
-        total_duration = Timecode.from_frames(0, fps)
-        for e in entries:
-            total_duration = total_duration + e.duration
-
-        # Count
-        count = len(entries)
-
-        # Bron TC in: earliest source_start (smallest)
-        source_starts = [e.source_start for e in entries if e.source_start is not None]
-        min_source_start = min(source_starts) if source_starts else None
-
-        # Bron TC out: latest source_end (largest)
-        source_ends = [e.source_end for e in entries if e.source_end is not None]
-        max_source_end = max(source_ends) if source_ends else None
-
-        # Bron gebruik totaal: sum of individual source durations
-        # Use pre-computed source_total_usage (from collapse) when available,
-        # otherwise fall back to (source_end - source_start) for non-collapsed entries
-        total_source_usage = Timecode.from_frames(0, fps)
-        has_source_usage = False
-        for e in entries:
-            if e.source_total_usage is not None:
-                total_source_usage = total_source_usage + e.source_total_usage
-                has_source_usage = True
-            elif e.source_start is not None and e.source_end is not None:
-                individual_usage = safe_source_usage(e.source_start, e.source_end, fps)
-                total_source_usage = total_source_usage + individual_usage
-                has_source_usage = True
-
-        result.append(DefSourcesEntry(
-            name=name,
-            timecode_in=min_tc_in,
-            duration=total_duration,
-            count=count,
-            description=first.description,
-            link=first.link,
-            source=first.source,
-            cost=first.cost,
-            rights_contact=first.rights_contact,
-            todo_notes=first.todo_notes,
-            source_in_frame=first.source_in_frame,
-            credits=first.credits,
-            source_start=min_source_start,
-            source_end=max_source_end,
-            source_total_usage=total_source_usage if has_source_usage else None,
-        ))
-
-    return result
-
-
-def save_def_sources_list(
-    sources_list: list[DefSourcesEntry],
-    output_path: Path | str,
-    delimiter: str = ',',
-    include_frames: bool = False
-) -> None:
-    """Save the DEF_SOURCES list to a CSV file.
-
-    Args:
-        sources_list: List of DefSourcesEntry objects to save
-        output_path: Path for the output file
-        delimiter: CSV delimiter (default is comma)
-        include_frames: If True, include frame-level precision in timecodes
-    """
-    output_path = Path(output_path)
-
-    rows = [entry.to_dict(include_frames=include_frames) for entry in sources_list]
-
-    df = pd.DataFrame(rows)
-    df.to_csv(output_path, sep=delimiter, index=False)
-
-
 def read_raw_csv(filepath: Path | str) -> pd.DataFrame:
     """Read a CSV file as-is, preserving original column names and data.
 
@@ -726,23 +644,20 @@ def save_excel_output(
     edl_path: Path | str,
     source_path: Path | str,
     def_list: list[DefEntry],
-    sources_list: list[DefSourcesEntry],
     output_path: Path | str,
     include_frames: bool = False
 ) -> None:
-    """Save all data to a single Excel file with four sheets.
+    """Save all data to a single Excel file with three sheets.
 
     Sheets:
     - SOURCE: Original source archive list
     - EDL: Original edit decision list
-    - DEF: Definitive archive list
-    - DEF_SOURCES: Aggregated sources list
+    - DEF: Definitive archive list (with occurrence tracking and cost deduplication)
 
     Args:
         edl_path: Path to the original EDL CSV file
         source_path: Path to the original source CSV file
-        def_list: List of DefEntry objects
-        sources_list: List of DefSourcesEntry objects
+        def_list: List of DefEntry objects (already annotated with occurrences)
         output_path: Path for the output Excel file (.xlsx)
         include_frames: If True, include frame-level precision in timecodes
     """
@@ -752,18 +667,14 @@ def save_excel_output(
     edl_raw = read_raw_csv(edl_path)
     source_raw = read_raw_csv(source_path)
 
-    # Build DEF and DEF_SOURCES DataFrames
+    # Build DEF DataFrame
     def_rows = [entry.to_dict(include_frames=include_frames) for entry in def_list]
     def_df = pd.DataFrame(def_rows)
-
-    sources_rows = [entry.to_dict(include_frames=include_frames) for entry in sources_list]
-    sources_df = pd.DataFrame(sources_rows)
 
     with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
         source_raw.to_excel(writer, sheet_name="SOURCE", index=False)
         edl_raw.to_excel(writer, sheet_name="EDL", index=False)
         def_df.to_excel(writer, sheet_name="DEF", index=False)
-        sources_df.to_excel(writer, sheet_name="DEF_SOURCES", index=False)
 
         workbook = writer.book
 
@@ -780,46 +691,60 @@ def save_excel_output(
             'bg_color': '#B8CCE4',
             'num_format': '€ #,##0',
         })
+        text_format = workbook.add_format({
+            'num_format': '@',  # Explicit text format to prevent fraction interpretation
+        })
 
         # Apply header formatting to all sheets
         for sheet_name, df in [
             ("SOURCE", source_raw),
             ("EDL", edl_raw),
             ("DEF", def_df),
-            ("DEF_SOURCES", sources_df),
         ]:
             worksheet = writer.sheets[sheet_name]
             for col_num, col_name in enumerate(df.columns):
                 worksheet.write(0, col_num, col_name, header_format)
 
-        # Format Kosten column as numbers in DEF and DEF_SOURCES sheets
-        for sheet_name, df in [("DEF", def_df), ("DEF_SOURCES", sources_df)]:
-            if "Kosten" in df.columns:
-                worksheet = writer.sheets[sheet_name]
-                kosten_col = df.columns.get_loc("Kosten")
-                for row_num, value in enumerate(df["Kosten"], start=1):
-                    # Parse string to number, removing currency symbols and whitespace
-                    if value and str(value).strip():
-                        clean_value = str(value).replace('€', '').replace(',', '.').strip()
+        # DEF sheet specific formatting
+        def_sheet = writer.sheets["DEF"]
+
+        # Format Kosten column as numbers (skip "zie boven" entries)
+        if "Kosten" in def_df.columns:
+            kosten_col = def_df.columns.get_loc("Kosten")
+            for row_num, value in enumerate(def_df["Kosten"], start=1):
+                if value and str(value).strip():
+                    str_value = str(value).strip()
+                    if str_value == "zie boven":
+                        # Keep as text string
+                        def_sheet.write_string(row_num, kosten_col, str_value)
+                    else:
+                        # Parse string to number, removing currency symbols and whitespace
+                        clean_value = str_value.replace('€', '').replace(',', '.').strip()
                         try:
                             num_value = float(clean_value)
-                            worksheet.write_number(row_num, kosten_col, num_value, currency_format)
+                            def_sheet.write_number(row_num, kosten_col, num_value, currency_format)
                         except ValueError:
                             # Keep as string if not parseable
-                            worksheet.write(row_num, kosten_col, value)
+                            def_sheet.write(row_num, kosten_col, value)
 
-        # Add Kosten sum to DEF_SOURCES sheet
-        if "Kosten" in sources_df.columns:
-            sources_sheet = writer.sheets["DEF_SOURCES"]
-            kosten_col = sources_df.columns.get_loc("Kosten")
-            data_rows = len(sources_df)
+        # Format Nummer/aantal column as text to prevent "2/4" being interpreted as a date/fraction
+        if "Nummer/aantal" in def_df.columns:
+            nummer_col = def_df.columns.get_loc("Nummer/aantal")
+            for row_num, value in enumerate(def_df["Nummer/aantal"], start=1):
+                if value and str(value).strip():
+                    def_sheet.write_string(row_num, nummer_col, str(value), text_format)
+
+        # Add Kosten sum to DEF sheet
+        if "Kosten" in def_df.columns:
+            kosten_col = def_df.columns.get_loc("Kosten")
+            data_rows = len(def_df)
             # Sum row: 3 rows below last data (row 0 is header, so last data is at row data_rows)
             sum_row = data_rows + 1 + 3  # +1 for header, +3 for empty rows
             # Excel formula uses 1-based row numbers; data starts at row 2
             sum_formula = f"=SUM({chr(65 + kosten_col)}2:{chr(65 + kosten_col)}{data_rows + 1})"
             # Add "Kosten totaal" label to the left of the sum cell
-            sources_sheet.write(sum_row, kosten_col - 1, "Kosten totaal", header_format)
-            sources_sheet.write_formula(sum_row, kosten_col, sum_formula, currency_header_format)
+            def_sheet.write(sum_row, kosten_col - 1, "Kosten totaal", header_format)
+            def_sheet.write_formula(sum_row, kosten_col, sum_formula, currency_header_format)
 
 
 def convert(
@@ -886,30 +811,23 @@ def convert(
     matched = sum(1 for d in def_list if d.link)
     print(f"  Matched {matched}/{len(def_list)} entries with sources")
 
-    # Step 6: Save DEF output
+    # Step 6: Annotate occurrences (for Nummer/aantal and cost deduplication)
+    print("Annotating source occurrences...")
+    annotate_occurrences(def_list)
+
+    # Step 7: Save DEF output
     print("Saving output...")
     save_def_list(def_list, output_path, delimiter=delimiter, include_frames=include_frames)
     print(f"  Saved DEF list to {output_path}")
 
-    # Step 7: Generate and save DEF_SOURCES output
-    print("Generating DEF_SOURCES (aggregated by filename)...")
-    sources_list = aggregate_def_list(def_list, fps=fps)
-    print(f"  Aggregated {len(def_list)} entries into {len(sources_list)} unique files")
-
-    # Derive DEF_SOURCES output path from the main output path
-    output_path = Path(output_path)
-    sources_path = output_path.parent / f"{output_path.stem}_SOURCES{output_path.suffix}"
-    save_def_sources_list(sources_list, sources_path, delimiter=delimiter, include_frames=include_frames)
-    print(f"  Saved DEF_SOURCES list to {sources_path}")
-
     # Step 8: Save combined Excel output
+    output_path = Path(output_path)
     excel_path = output_path.parent / f"{output_path.stem}.xlsx"
     print("Saving Excel output...")
     save_excel_output(
         edl_path=edl_path,
         source_path=source_path,
         def_list=def_list,
-        sources_list=sources_list,
         output_path=excel_path,
         include_frames=include_frames,
     )
