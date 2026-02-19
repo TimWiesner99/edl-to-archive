@@ -1,8 +1,8 @@
 """Data models for EDL entries, source entries, and the definitive archive list."""
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Optional, List
+from dataclasses import dataclass
+from typing import Optional
 
 from .timecode import Timecode
 
@@ -156,6 +156,9 @@ class DefEntry:
     source_start: Optional[Timecode] = None
     source_end: Optional[Timecode] = None
     source_total_usage: Optional[Timecode] = None  # Pre-computed sum of source durations (from collapse)
+    # Occurrence tracking (set by annotate_occurrences)
+    occurrence_number: int = 0   # Which occurrence this is (1-based)
+    total_occurrences: int = 0   # Total times this source appears
 
     @classmethod
     def from_edl_and_source(
@@ -201,13 +204,26 @@ class DefEntry:
                           If False (default), round to seconds (HH:MM:SS).
 
         Returns:
-            Dictionary representation of the entry in the new column order:
+            Dictionary representation of the entry in the column order:
             TC in, Duur, Bestandsnaam, Omschrijving, Link, Bron, Kosten,
-            rechten/contact, to do, Bron in beeld, Aftiteling, Bron TC in, Bron TC out
+            rechten/contact, to do, Bron in beeld, Aftiteling,
+            Nummer/aantal, Bron TC in, Bron TC out
         """
         # Choose formatting method based on include_frames flag
         tc_format = lambda tc: tc.to_string() if include_frames else tc.to_string_rounded()
 
+        # For cost: show actual cost on first occurrence, "zie boven" on subsequent
+        if self.occurrence_number > 1:
+            display_cost = "zie boven"
+        else:
+            display_cost = self.cost
+
+        # Nummer/aantal: "occurrence/total" (e.g. "2/4"), empty if not annotated
+        if self.total_occurrences > 0:
+            nummer_aantal = f"{self.occurrence_number}/{self.total_occurrences}"
+        else:
+            nummer_aantal = ""
+
         return {
             "TC in": tc_format(self.timecode_in),
             "Duur": tc_format(self.duration),
@@ -215,68 +231,12 @@ class DefEntry:
             "Omschrijving": self.description,
             "Link": self.link,
             "Bron": self.source,
-            "Kosten": self.cost,
+            "Kosten": display_cost,
             "rechten/contact": self.rights_contact,
             "to do": self.todo_notes,
             "Bron in beeld": self.source_in_frame,
             "Aftiteling": self.credits,
+            "Nummer/aantal": nummer_aantal,
             "Bron TC in": tc_format(self.source_start) if self.source_start else "",
             "Bron TC out": tc_format(self.source_end) if self.source_end else "",
-        }
-
-
-@dataclass
-class DefSourcesEntry:
-    """Represents an aggregated entry for the DEF_SOURCES output.
-
-    Groups all DEF entries by filename, combining timecodes and counting occurrences.
-    """
-
-    name: str
-    timecode_in: Timecode          # Earliest TC in across all occurrences
-    duration: Timecode             # Sum of all durations
-    count: int                     # Number of occurrences
-    description: str = ""
-    link: str = ""
-    source: str = ""
-    cost: str = ""
-    rights_contact: str = ""
-    todo_notes: str = ""
-    source_in_frame: str = ""
-    credits: str = ""
-    source_start: Optional[Timecode] = None   # Earliest Bron TC in
-    source_end: Optional[Timecode] = None     # Latest Bron TC out
-    source_total_usage: Optional[Timecode] = None  # Sum of individual (Bron TC out - Bron TC in)
-
-    def to_dict(self, include_frames: bool = False) -> dict:
-        """Convert DefSourcesEntry to dictionary for output.
-
-        Args:
-            include_frames: If True, include frame-level precision in timecodes (HH:MM:SS:FF).
-                          If False (default), round to seconds (HH:MM:SS).
-
-        Returns:
-            Dictionary representation with columns:
-            TC in, Duur, Aantal, Bestandsnaam, Omschrijving, Link, Bron, Kosten,
-            rechten/contact, to do, Bron in beeld, Aftiteling,
-            Bron TC in, Bron TC out, Bron gebruik totaal
-        """
-        tc_format = lambda tc: tc.to_string() if include_frames else tc.to_string_rounded()
-
-        return {
-            "TC in": tc_format(self.timecode_in),
-            "Duur": tc_format(self.duration),
-            "Aantal": self.count,
-            "Bestandsnaam": self.name,
-            "Omschrijving": self.description,
-            "Link": self.link,
-            "Bron": self.source,
-            "Kosten": self.cost,
-            "rechten/contact": self.rights_contact,
-            "to do": self.todo_notes,
-            "Bron in beeld": self.source_in_frame,
-            "Aftiteling": self.credits,
-            "Bron TC in": tc_format(self.source_start) if self.source_start else "",
-            "Bron TC out": tc_format(self.source_end) if self.source_end else "",
-            "Bron gebruik totaal": tc_format(self.source_total_usage) if self.source_total_usage else "",
         }
