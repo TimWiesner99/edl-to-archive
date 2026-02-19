@@ -13,7 +13,7 @@ FOR every row in EDL:
 	skip first row
 	LOAD this row as object
 	LOAD previous row as object
-	IF this.Name == previous.Name
+	IF this.Name == previous.Name AND abs(this.source_start - previous.source_end) < Timecode(seconds=1):
 		make new row(name= this.name, timecode_in = previous.timecode_in, source_start = min(previous.source_start, this.source_start), timecode_out = previous.timecode_out, source_end = max(previous.source_start, this.source_start), duration=previous.duration + this.duration)
 
 		remove this row

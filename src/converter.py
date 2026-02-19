@@ -391,15 +391,19 @@ def safe_source_usage(source_start: Timecode, source_end: Timecode, fps: int = 2
 
 
 def collapse_edl(entries: list[EDLEntry], fps: int = 25, verbose: bool = False) -> list[EDLEntry]:
-    """Collapse consecutive EDL entries with the same name.
+    """Collapse consecutive EDL entries with the same name and continuous source timecodes.
 
-    When two or more consecutive entries have the same name, they are combined
-    into a single entry with:
+    When two or more consecutive entries have the same name AND their source
+    timecodes are continuous (within 1 second), they are combined into a single
+    entry with:
     - timecode_in from the first entry
     - timecode_out from the last entry
     - Combined duration
     - source_start as the minimum of all source_starts
     - source_end as the maximum of all source_ends
+
+    Entries with the same name but non-continuous source positions (e.g. different
+    parts of the same source clip) are kept separate.
 
     Args:
         entries: List of EDL entries
@@ -412,18 +416,28 @@ def collapse_edl(entries: list[EDLEntry], fps: int = 25, verbose: bool = False) 
     if not entries:
         return []
 
+    one_second = Timecode.from_frames(fps, fps)
+
     collapsed = []
     i = 0
 
     while i < len(entries):
         current = entries[i]
 
-        # Look ahead for consecutive entries with the same name
+        # Look ahead for consecutive entries with the same name AND continuous source timecodes
         j = i + 1
         while j < len(entries) and entries[j].name == current.name:
+            prev = entries[j - 1]
+            curr = entries[j]
+            # Check if source timecodes are continuous (within 1 second margin)
+            gap_frames = curr.source_start.to_frames() - prev.source_end.to_frames()
+            if gap_frames < 0:
+                gap_frames = -gap_frames
+            if gap_frames > one_second.to_frames():
+                break
             j += 1
 
-        # If we found consecutive duplicates
+        # If we found consecutive duplicates with continuous source
         if j > i + 1:
             # Combine all entries from i to j-1
             group = entries[i:j]
