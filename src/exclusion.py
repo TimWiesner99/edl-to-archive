@@ -695,6 +695,39 @@ def load_exclusion_rules(filepath: Path | str, verbose: bool = False) -> Exclusi
     return ExclusionRuleSet(rules)
 
 
+def parse_exclusion_rules(text: str) -> ExclusionRuleSet:
+    """Parse exclusion rules from a text string.
+
+    Each non-empty, non-comment line is parsed as a rule.
+    Lines starting with # are treated as comments.
+
+    Args:
+        text: The rules text (one rule per line)
+
+    Returns:
+        ExclusionRuleSet containing all parsed rules
+
+    Raises:
+        ExclusionRuleSyntaxError: If any rule has invalid syntax
+    """
+    rules = []
+    for line_num, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        try:
+            expression = parse_rule(stripped)
+            rule = Rule(expression=expression, text=stripped, line_number=line_num)
+            rules.append(rule)
+        except ExclusionRuleSyntaxError as e:
+            raise ExclusionRuleSyntaxError(
+                str(e),
+                line_number=line_num,
+                line=stripped
+            ) from None
+    return ExclusionRuleSet(rules)
+
+
 def filter_edl_entries(
     entries: list[EDLEntry],
     rules: ExclusionRuleSet,
