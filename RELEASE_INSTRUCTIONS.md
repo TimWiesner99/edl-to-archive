@@ -1,6 +1,6 @@
 # Release Instructions
 
-This guide walks you through creating releases for the EDL-to-Archive desktop application. The GitHub Actions workflow automatically builds executables for Windows and macOS and attaches them to the release.
+This guide walks you through creating releases for the EDL-to-Archive application. The GitHub Actions workflow automatically packages the source code with launcher scripts and attaches a zip to the release.
 
 ## Prerequisites
 
@@ -11,8 +11,8 @@ This guide walks you through creating releases for the EDL-to-Archive desktop ap
 
 1. You tag a commit with a version number (e.g., `v1.0.0`).
 2. Pushing the tag triggers the GitHub Actions workflow (`.github/workflows/build.yml`).
-3. The workflow builds the app on Windows and macOS using PyInstaller.
-4. The built executables are zipped and attached to a GitHub Release.
+3. The workflow packages all source files with the launcher scripts (`run.bat`, `run.sh`) into a zip.
+4. The zip is attached to a GitHub Release.
 5. When users open the app, it checks for the latest release and notifies them if an update is available.
 
 ## Step-by-step: Creating a release
@@ -52,14 +52,14 @@ git push origin v1.0.0
 1. Go to your repository on GitHub.
 2. Click the **Actions** tab.
 3. You should see a workflow run triggered by the tag push.
-4. The build takes a few minutes (it builds on both Windows and macOS).
+4. The packaging step only takes a few seconds.
 
 ### 4. Check the release
 
-1. Go to the **Releases** section of your repository (right sidebar on the main page, or the "Releases" link).
+1. Go to the **Releases** section of your repository.
 2. You should see a new release with:
    - Auto-generated release notes (list of commits since last tag).
-   - Two zip files: `EDL-to-Archive-Windows.zip` and `EDL-to-Archive-macOS.zip`.
+   - One zip file: `EDL-to-Archive.zip`.
 
 ### 5. (Optional) Edit the release notes
 
@@ -85,28 +85,13 @@ The check has a 3-second timeout and fails silently if the user is offline.
 
 ## Distributing to users
 
-Send your colleagues the appropriate zip file along with the first-run instructions below.
+Send your colleagues the `EDL-to-Archive.zip` file. They need to:
 
-### Windows
+1. Extract the zip to any folder.
+2. **Windows**: Double-click `run.bat`.
+3. **macOS / Linux**: Double-click `run.sh` (or run `./run.sh` in a terminal).
 
-1. Download and extract `EDL-to-Archive-Windows.zip`.
-2. Double-click `EDL-to-Archive.exe`.
-3. **First time only**: Windows SmartScreen will show "Windows protected your PC". This is normal for apps without a paid code signing certificate.
-   - Click **"More info"** (the small text link).
-   - Click **"Run anyway"**.
-   - This only needs to be done once — subsequent launches open normally.
-
-### macOS
-
-1. Download and extract `EDL-to-Archive-macOS.zip`.
-2. **First time only**: macOS Gatekeeper blocks unsigned apps from double-clicking. Use one of these methods:
-   - **Method A (easiest)**: Right-click (or Control-click) the app → select **"Open"** → click **"Open"** again on the warning dialog.
-   - **Method B (Terminal)**: Open Terminal and run:
-     ```bash
-     xattr -cr ~/Downloads/EDL-to-Archive-macOS/EDL-to-Archive.app
-     ```
-     Then double-click the app normally.
-3. After the first launch, macOS remembers your choice and the app opens normally.
+The launcher script automatically installs [uv](https://docs.astral.sh/uv/) (if needed), downloads the correct Python version, installs dependencies, and starts the app. The first launch takes a moment; subsequent launches are near-instant.
 
 ## Troubleshooting
 
@@ -114,12 +99,6 @@ Send your colleagues the appropriate zip file along with the first-run instructi
 
 - Make sure you pushed the **tag**, not just the commit: `git push origin v1.0.0`
 - Check that the tag name starts with `v` (the workflow triggers on `v*`)
-
-### The build fails
-
-- Click into the failed workflow run in the Actions tab to see logs.
-- Common issues: Python version not available, dependency installation failures.
-- The workflow uses Python 3.14 — if that's not available on GitHub Actions yet, change `python-version` in the workflow to a version that is (e.g., `"3.12"`).
 
 ### Users don't see update notifications
 

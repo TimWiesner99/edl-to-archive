@@ -1,10 +1,28 @@
 # edl-to-archive
 Simple script to convert EDL and archive source lists to complete archive lists with timecodes and source links.
 
-## Usage
+## Getting Started
+
+### Running the application
+
+**Windows:** Double-click `run.bat`
+
+**macOS / Linux:** Double-click `run.sh` (or run `./run.sh` in a terminal)
+
+The launcher script automatically:
+1. Installs [uv](https://docs.astral.sh/uv/) (a fast Python package manager) if not already present
+2. Downloads the correct Python version if needed
+3. Installs all dependencies
+4. Starts the GUI
+
+The first launch may take a moment while dependencies are downloaded. Subsequent launches are near-instant.
+
+### CLI Usage
+
+For command-line usage, run commands through `uv run`:
 
 ```bash
-python main.py <edl_file> <source_file> -o <output_file> [options]
+uv run python main.py <edl_file> <source_file> -o <output_file> [options]
 ```
 
 ### Options
@@ -21,19 +39,19 @@ python main.py <edl_file> <source_file> -o <output_file> [options]
 
 ```bash
 # Basic conversion
-python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv
+uv run python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv
 
 # With exclusion rules
-python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --exclude exclude.txt
+uv run python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --exclude exclude.txt
 
 # With verbose output to see which entries are excluded
-python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --exclude exclude.txt -v
+uv run python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --exclude exclude.txt -v
 
 # With detailed verbose output to debug exclusion rules
-python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --exclude exclude.txt -vv
+uv run python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --exclude exclude.txt -vv
 
 # Different frame rate, tab-delimited output
-python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --fps 24 --delimiter tab
+uv run python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --fps 24 --delimiter tab
 ```
 
 ## Exclusion Rules
