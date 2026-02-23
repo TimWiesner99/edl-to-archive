@@ -6,7 +6,6 @@ from __future__ import annotations
 import io
 import sys
 import threading
-import webbrowser
 from pathlib import Path
 from tkinter import filedialog
 
@@ -14,8 +13,8 @@ import customtkinter as ctk
 
 from src.config import (
     ensure_template_files,
-    get_app_data_dir,
     get_edl_path,
+    get_output_dir,
     get_source_path,
     load_config,
     open_file_in_default_app,
@@ -24,7 +23,7 @@ from src.config import (
 )
 from src.converter import convert, validate_edl_file, validate_source_file
 from src.exclusion import ExclusionRuleSyntaxError, parse_exclusion_rules
-from src.updater import check_for_update_async, get_current_version
+from src.updater import check_for_update_async, get_current_version, pull_latest
 
 # Appearance
 ctk.set_appearance_mode("system")
@@ -34,80 +33,26 @@ FPS_OPTIONS = ["24", "25", "30", "50", "60"]
 DELIMITER_OPTIONS = ["comma", "tab"]
 
 
-class UpdateDialog(ctk.CTkToplevel):
-    """Dialog shown when a new version is available."""
-
-    def __init__(self, parent, update_info: dict, config: dict):
-        super().__init__(parent)
-        self.config = config
-        self.title("Update Available")
-        self.geometry("480x320")
-        self.resizable(False, False)
-        self.grab_set()
-
-        current = get_current_version()
-        new_ver = update_info["version"]
-
-        ctk.CTkLabel(
-            self, text="A new version is available!",
-            font=ctk.CTkFont(size=16, weight="bold"),
-        ).pack(pady=(20, 5))
-
-        ctk.CTkLabel(
-            self, text=f"Current: v{current}  →  New: v{new_ver}",
-            font=ctk.CTkFont(size=13),
-        ).pack(pady=5)
-
-        if update_info.get("body"):
-            notes_box = ctk.CTkTextbox(self, height=120, width=420)
-            notes_box.pack(padx=20, pady=10)
-            notes_box.insert("1.0", update_info["body"])
-            notes_box.configure(state="disabled")
-
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(pady=10)
-
-        ctk.CTkButton(
-            btn_frame, text="Download",
-            command=lambda: self._download(update_info["url"]),
-        ).pack(side="left", padx=5)
-
-        ctk.CTkButton(
-            btn_frame, text="Skip This Version",
-            fg_color="gray", hover_color="darkgray",
-            command=lambda: self._skip(new_ver),
-        ).pack(side="left", padx=5)
-
-        ctk.CTkButton(
-            btn_frame, text="Remind Me Later",
-            fg_color="gray", hover_color="darkgray",
-            command=self.destroy,
-        ).pack(side="left", padx=5)
-
-    def _download(self, url: str) -> None:
-        webbrowser.open(url)
-        self.destroy()
-
-    def _skip(self, version: str) -> None:
-        self.config["skipped_version"] = version
-        save_config(self.config)
-        self.destroy()
-
-
 class App(ctk.CTk):
     """Main application window."""
 
     def __init__(self):
         super().__init__()
 
-        self.title(f"EDL to Archive Converter  v{get_current_version()}")
-        self.geometry("680x820")
+        self.title("EDL to Archive Converter")
+        self.geometry("680x860")
         self.minsize(580, 700)
 
         # Load config and ensure template files exist
         self.config = load_config()
         ensure_template_files()
 
+        # Row 0: fixed top bar; Row 1: scrollable content
+        self.grid_rowconfigure(0, weight=0)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        self._build_top_bar()
         self._build_ui()
         self._load_config_into_ui()
 
@@ -116,13 +61,48 @@ class App(ctk.CTk):
 
     # ── UI Construction ──────────────────────────────────────────────
 
+    def _build_top_bar(self) -> None:
+        """Build the top bar with version label and update button."""
+        top_bar = ctk.CTkFrame(self, fg_color="transparent")
+        top_bar.grid(row=0, column=0, sticky="ew", padx=10, pady=(6, 0))
+        top_bar.grid_columnconfigure(0, weight=1)  # spacer pushes content right
+
+        # Version label
+        ctk.CTkLabel(
+            top_bar,
+            text=f"v{get_current_version()}",
+            font=ctk.CTkFont(size=12),
+            text_color="gray",
+        ).grid(row=0, column=1, padx=(0, 8), pady=6)
+
+        # Update button container — allows overlaying the notification dot
+        btn_container = ctk.CTkFrame(top_bar, fg_color="transparent")
+        btn_container.grid(row=0, column=2, padx=(0, 4), pady=6)
+
+        self.update_btn = ctk.CTkButton(
+            btn_container,
+            text="↻  Update",
+            width=110,
+            height=28,
+            command=self._on_update_click,
+        )
+        self.update_btn.pack()
+
+        # Notification dot — overlaid at top-right corner of button via place()
+        self.notif_dot = ctk.CTkLabel(
+            btn_container,
+            text="",
+            width=12,
+            height=12,
+            fg_color="#FF5722",
+            corner_radius=6,
+        )
+        # Hidden initially; use _show_notif_dot() / _hide_notif_dot() to toggle
+
     def _build_ui(self) -> None:
         # Scrollable frame for the entire content
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-
         container = ctk.CTkScrollableFrame(self)
-        container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         container.grid_columnconfigure(0, weight=1)
 
         row = 0
@@ -328,7 +308,7 @@ class App(ctk.CTk):
 
         if not output_path:
             # Default output next to EDL in app data dir
-            output_path = str(get_app_data_dir() / "DEF.csv")
+            output_path = str(get_output_dir() / "DEF.csv")
             self.output_var.set(output_path)
 
         # Validate inputs
@@ -430,20 +410,38 @@ class App(ctk.CTk):
 
         self.convert_btn.configure(state="normal", text="Convert")
 
-    # ── Update Check ─────────────────────────────────────────────────
+    # ── Update ────────────────────────────────────────────────────────
 
-    def _on_update_check_result(self, result: dict | None) -> None:
-        """Called from the background thread with the update check result."""
-        if result is None:
-            return
-        # Schedule dialog on the main thread
-        self.after(500, self._show_update_dialog, result)
+    def _on_update_check_result(self, has_update: bool) -> None:
+        """Called from the background thread with the version check result."""
+        if has_update:
+            self.after(0, self._show_notif_dot)
 
-    def _show_update_dialog(self, update_info: dict) -> None:
-        skipped = self.config.get("skipped_version", "")
-        if update_info["version"] == skipped:
-            return
-        UpdateDialog(self, update_info, self.config)
+    def _show_notif_dot(self) -> None:
+        self.notif_dot.place(relx=1.0, rely=0.0, x=-6, y=2, anchor="ne")
+
+    def _hide_notif_dot(self) -> None:
+        self.notif_dot.place_forget()
+
+    def _on_update_click(self) -> None:
+        """Pull the latest version from the main branch."""
+        self.update_btn.configure(state="disabled", text="Pulling...")
+        self._hide_notif_dot()
+        self._log("Pulling latest version from GitHub...")
+        threading.Thread(target=self._run_pull, daemon=True).start()
+
+    def _run_pull(self) -> None:
+        success, output = pull_latest()
+        self.after(0, self._on_pull_done, success, output)
+
+    def _on_pull_done(self, success: bool, output: str) -> None:
+        self.update_btn.configure(state="normal", text="↻  Update")
+        if output:
+            self._log(output)
+        if success:
+            self._log("\nUpdate applied. Please restart the application for changes to take effect.")
+        else:
+            self._log("\nUpdate failed. See output above for details.")
 
     # ── Logging ──────────────────────────────────────────────────────
 

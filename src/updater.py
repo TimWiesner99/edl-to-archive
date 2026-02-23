@@ -1,38 +1,41 @@
-"""Auto-update checker using GitHub Releases API.
+"""Version checking and git-based update mechanism.
 
-Checks for newer versions on startup and presents an update notification.
-Fails silently on network errors so offline users are never blocked.
+Checks the version in pyproject.toml on the main branch and pulls updates
+via git pull. Fails silently on network errors.
 """
 
 from __future__ import annotations
 
-import json
+import re
+import subprocess
 import threading
-import urllib.request
 import urllib.error
-import webbrowser
-from importlib.metadata import version, PackageNotFoundError
+import urllib.request
+from pathlib import Path
 
-# Configure with your GitHub repository (owner/repo format).
 GITHUB_REPO = "TimWiesner99/edl-to-archive"
+CHECK_TIMEOUT = 5  # seconds
 
-# Timeout for the API request (seconds).
-CHECK_TIMEOUT = 3
+# Project root is the parent of the src/ directory where this file lives
+_PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def get_current_version() -> str:
-    """Get the current application version from package metadata."""
+    """Read the version from the local pyproject.toml."""
     try:
-        return version("edl-to-archive")
-    except PackageNotFoundError:
-        return "0.2"
+        content = (_PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
+        if match:
+            return match.group(1)
+    except OSError:
+        pass
+    return "0.1"
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
-    """Parse a version string like '1.2.3' or 'v1.2.3' into a tuple of ints."""
-    v = v.strip().lstrip("v")
+    """Parse '1.2.3' or 'v1.2.3' into a comparable tuple of ints."""
     parts = []
-    for segment in v.split("."):
+    for segment in v.strip().lstrip("v").split("."):
         try:
             parts.append(int(segment))
         except ValueError:
@@ -40,52 +43,66 @@ def _parse_version(v: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def check_for_update() -> dict | None:
-    """Check GitHub Releases for a newer version.
+def _get_remote_version() -> str | None:
+    """Fetch the version from pyproject.toml on the main branch.
 
-    Returns:
-        A dict with keys 'version', 'url', 'body' if a newer release exists,
-        or None if up-to-date or on error.
+    Returns the version string, or None on any error.
     """
-    current = get_current_version()
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-
+    url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/pyproject.toml"
     try:
-        req = urllib.request.Request(
-            api_url,
-            headers={"Accept": "application/vnd.github.v3+json"},
-        )
-        with urllib.request.urlopen(req, timeout=CHECK_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
-        return None
-
-    tag = data.get("tag_name", "")
-    if not tag:
-        return None
-
-    if _parse_version(tag) > _parse_version(current):
-        return {
-            "version": tag.lstrip("v"),
-            "url": data.get("html_url", ""),
-            "body": data.get("body", ""),
-        }
-
+        with urllib.request.urlopen(url, timeout=CHECK_TIMEOUT) as resp:
+            content = resp.read().decode("utf-8")
+        match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
+        if match:
+            return match.group(1)
+    except (urllib.error.URLError, OSError, TimeoutError):
+        pass
     return None
 
 
+def check_for_update() -> bool:
+    """Return True if the main branch has a higher version than the local copy."""
+    remote = _get_remote_version()
+    if remote is None:
+        return False
+    return _parse_version(remote) > _parse_version(get_current_version())
+
+
 def check_for_update_async(callback) -> None:
-    """Run the update check in a background thread.
+    """Run the version check in a background thread.
 
     Args:
-        callback: Called on the main thread with the result dict (or None).
-                  The caller is responsible for scheduling the callback on
-                  the GUI thread if needed.
+        callback: Called with True if an update is available, False otherwise.
     """
-
     def _worker():
         result = check_for_update()
         callback(result)
 
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def pull_latest() -> tuple[bool, str]:
+    """Run 'git pull origin main' from the project root.
+
+    Returns:
+        Tuple of (success: bool, output: str).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "pull", "origin", "main"],
+            cwd=str(_PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        output = (result.stdout + result.stderr).strip()
+        return result.returncode == 0, output
+    except FileNotFoundError:
+        return False, (
+            "git was not found on PATH.\n"
+            "Please ensure Git is installed and available in your terminal."
+        )
+    except subprocess.TimeoutExpired:
+        return False, "git pull timed out after 60 seconds."
+    except OSError as e:
+        return False, f"Failed to run git: {e}"
