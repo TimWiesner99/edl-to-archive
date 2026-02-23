@@ -12,10 +12,3 @@ dependencies = [
     "xlsxwriter>=3.2.0",
 ]
 
-[project.gui-scripts]
-edl-to-archive-gui = "gui:main"
-
-[project.optional-dependencies]
-build = [
-    "pyinstaller>=6.0",
-]

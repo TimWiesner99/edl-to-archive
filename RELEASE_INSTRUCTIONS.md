@@ -1,6 +1,6 @@
 # Release Instructions
 
-This guide walks you through creating releases for the EDL-to-Archive desktop application. The GitHub Actions workflow automatically builds executables for Windows and macOS and attaches them to the release.
+This guide walks you through creating releases for the EDL-to-Archive application. The GitHub Actions workflow automatically packages the source code with launcher scripts and attaches a zip to the release.
 
 ## Prerequisites
 
@@ -11,8 +11,8 @@ This guide walks you through creating releases for the EDL-to-Archive desktop ap
 
 1. You tag a commit with a version number (e.g., `v1.0.0`).
 2. Pushing the tag triggers the GitHub Actions workflow (`.github/workflows/build.yml`).
-3. The workflow builds the app on Windows and macOS using PyInstaller.
-4. The built executables are zipped and attached to a GitHub Release.
+3. The workflow packages all source files with the launcher scripts (`run.bat`, `run.sh`) into a zip.
+4. The zip is attached to a GitHub Release.
 5. When users open the app, it checks for the latest release and notifies them if an update is available.
 
 ## Step-by-step: Creating a release
@@ -52,14 +52,14 @@ git push origin v1.0.0
 1. Go to your repository on GitHub.
 2. Click the **Actions** tab.
 3. You should see a workflow run triggered by the tag push.
-4. The build takes a few minutes (it builds on both Windows and macOS).
+4. The packaging step only takes a few seconds.
 
 ### 4. Check the release
 
-1. Go to the **Releases** section of your repository (right sidebar on the main page, or the "Releases" link).
+1. Go to the **Releases** section of your repository.
 2. You should see a new release with:
    - Auto-generated release notes (list of commits since last tag).
-   - Two zip files: `EDL-to-Archive-Windows.zip` and `EDL-to-Archive-macOS.zip`.
+   - One zip file: `EDL-to-Archive.zip`.
 
 ### 5. (Optional) Edit the release notes
 
@@ -85,12 +85,13 @@ The check has a 3-second timeout and fails silently if the user is offline.
 
 ## Distributing to users
 
-Send your colleagues the appropriate zip file:
+Send your colleagues the `EDL-to-Archive.zip` file. They need to:
 
-- **Windows users**: `EDL-to-Archive-Windows.zip` — extract and run `EDL-to-Archive.exe`
-- **Mac users**: `EDL-to-Archive-macOS.zip` — extract and run the `EDL-to-Archive` app
+1. Extract the zip to any folder.
+2. **Windows**: Double-click `run.bat`.
+3. **macOS / Linux**: Double-click `run.sh` (or run `./run.sh` in a terminal).
 
-On macOS, users may need to right-click → Open the first time (Gatekeeper warning for unsigned apps). If you want to avoid this, you can sign the app with an Apple Developer certificate — but that's a separate process and not required for internal distribution.
+The launcher script automatically installs [uv](https://docs.astral.sh/uv/) (if needed), downloads the correct Python version, installs dependencies, and starts the app. The first launch takes a moment; subsequent launches are near-instant.
 
 ## Troubleshooting
 
@@ -98,12 +99,6 @@ On macOS, users may need to right-click → Open the first time (Gatekeeper warn
 
 - Make sure you pushed the **tag**, not just the commit: `git push origin v1.0.0`
 - Check that the tag name starts with `v` (the workflow triggers on `v*`)
-
-### The build fails
-
-- Click into the failed workflow run in the Actions tab to see logs.
-- Common issues: Python version not available, dependency installation failures.
-- The workflow uses Python 3.14 — if that's not available on GitHub Actions yet, change `python-version` in the workflow to a version that is (e.g., `"3.12"`).
 
 ### Users don't see update notifications
 
