@@ -85,12 +85,28 @@ The check has a 3-second timeout and fails silently if the user is offline.
 
 ## Distributing to users
 
-Send your colleagues the appropriate zip file:
+Send your colleagues the appropriate zip file along with the first-run instructions below.
 
-- **Windows users**: `EDL-to-Archive-Windows.zip` — extract and run `EDL-to-Archive.exe`
-- **Mac users**: `EDL-to-Archive-macOS.zip` — extract and run the `EDL-to-Archive` app
+### Windows
 
-On macOS, users may need to right-click → Open the first time (Gatekeeper warning for unsigned apps). If you want to avoid this, you can sign the app with an Apple Developer certificate — but that's a separate process and not required for internal distribution.
+1. Download and extract `EDL-to-Archive-Windows.zip`.
+2. Double-click `EDL-to-Archive.exe`.
+3. **First time only**: Windows SmartScreen will show "Windows protected your PC". This is normal for apps without a paid code signing certificate.
+   - Click **"More info"** (the small text link).
+   - Click **"Run anyway"**.
+   - This only needs to be done once — subsequent launches open normally.
+
+### macOS
+
+1. Download and extract `EDL-to-Archive-macOS.zip`.
+2. **First time only**: macOS Gatekeeper blocks unsigned apps from double-clicking. Use one of these methods:
+   - **Method A (easiest)**: Right-click (or Control-click) the app → select **"Open"** → click **"Open"** again on the warning dialog.
+   - **Method B (Terminal)**: Open Terminal and run:
+     ```bash
+     xattr -cr ~/Downloads/EDL-to-Archive-macOS/EDL-to-Archive.app
+     ```
+     Then double-click the app normally.
+3. After the first launch, macOS remembers your choice and the app opens normally.
 
 ## Troubleshooting
 
