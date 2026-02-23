@@ -26,7 +26,6 @@ DEFAULT_CONFIG = {
     "collapse": True,
     "frames": False,
     "output_path": "",
-    "skipped_version": "",
 }
 
 
