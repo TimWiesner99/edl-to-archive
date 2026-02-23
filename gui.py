@@ -14,8 +14,8 @@ import customtkinter as ctk
 
 from src.config import (
     ensure_template_files,
-    get_app_data_dir,
     get_edl_path,
+    get_output_dir,
     get_source_path,
     load_config,
     open_file_in_default_app,
@@ -328,7 +328,7 @@ class App(ctk.CTk):
 
         if not output_path:
             # Default output next to EDL in app data dir
-            output_path = str(get_app_data_dir() / "DEF.csv")
+            output_path = str(get_output_dir() / "DEF.csv")
             self.output_var.set(output_path)
 
         # Validate inputs
