@@ -1,7 +1,7 @@
 [project]
 name = "edl-to-archive"
-version = "0.1"
-description = "Add your description here"
+version = "0.2"
+description = "Simple software to convert EDL files and source lists to a definitive list of used sources."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

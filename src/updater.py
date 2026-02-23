@@ -25,7 +25,7 @@ def get_current_version() -> str:
     try:
         return version("edl-to-archive")
     except PackageNotFoundError:
-        return "0.1"
+        return "0.2"
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
