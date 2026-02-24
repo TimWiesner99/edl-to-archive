@@ -212,11 +212,16 @@ class DefEntry:
         # Choose formatting method based on include_frames flag
         tc_format = lambda tc: tc.to_string() if include_frames else tc.to_string_rounded()
 
-        # For cost: show actual cost on first occurrence, "zie boven" on subsequent
+        # For cost, source_in_frame, and credits: show actual value on first
+        # occurrence, "-" on subsequent occurrences of the same source.
         if self.occurrence_number > 1:
-            display_cost = "zie boven"
+            display_cost = "-"
+            display_source_in_frame = "-"
+            display_credits = "-"
         else:
             display_cost = self.cost
+            display_source_in_frame = self.source_in_frame
+            display_credits = self.credits
 
         # Nummer/aantal: "occurrence/total" (e.g. "2/4"), empty if not annotated
         if self.total_occurrences > 0:
@@ -234,8 +239,8 @@ class DefEntry:
             "Kosten": display_cost,
             "rechten/contact": self.rights_contact,
             "to do": self.todo_notes,
-            "Bron in beeld": self.source_in_frame,
-            "Aftiteling": self.credits,
+            "Bron in beeld": display_source_in_frame,
+            "Aftiteling": display_credits,
             "Nummer/aantal": nummer_aantal,
             "Bron TC in": tc_format(self.source_start) if self.source_start else "",
             "Bron TC out": tc_format(self.source_end) if self.source_end else "",

@@ -722,14 +722,14 @@ def save_excel_output(
         # DEF sheet specific formatting
         def_sheet = writer.sheets["DEF"]
 
-        # Format Kosten column as numbers (skip "zie boven" entries)
+        # Format Kosten column as numbers (skip "-" entries for repeated sources)
         if "Kosten" in def_df.columns:
             kosten_col = def_df.columns.get_loc("Kosten")
             for row_num, value in enumerate(def_df["Kosten"], start=1):
                 if value and str(value).strip():
                     str_value = str(value).strip()
-                    if str_value == "zie boven":
-                        # Keep as text string
+                    if str_value == "-":
+                        # Keep as text string (repeated source, already accounted for)
                         def_sheet.write_string(row_num, kosten_col, str_value)
                     else:
                         # Parse string to number, removing currency symbols and whitespace
@@ -829,22 +829,18 @@ def convert(
     print("Annotating source occurrences...")
     annotate_occurrences(def_list)
 
-    # Step 7: Save DEF output
-    print("Saving output...")
-    save_def_list(def_list, output_path, delimiter=delimiter, include_frames=include_frames)
-    print(f"  Saved DEF list to {output_path}")
-
-    # Step 8: Save combined Excel output
+    # Step 7: Save Excel output
     output_path = Path(output_path)
-    excel_path = output_path.parent / f"{output_path.stem}.xlsx"
+    if output_path.suffix.lower() != ".xlsx":
+        output_path = output_path.with_suffix(".xlsx")
     print("Saving Excel output...")
     save_excel_output(
         edl_path=edl_path,
         source_path=source_path,
         def_list=def_list,
-        output_path=excel_path,
+        output_path=output_path,
         include_frames=include_frames,
     )
-    print(f"  Saved Excel file to {excel_path}")
+    print(f"  Saved Excel file to {output_path}")
 
     return def_list

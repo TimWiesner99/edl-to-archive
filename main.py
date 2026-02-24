@@ -24,7 +24,7 @@ from src.exclusion import load_exclusion_rules, ExclusionRuleSyntaxError
 DEFAULT_INPUT_DIR = Path("input")
 DEFAULT_EDL_PATH = DEFAULT_INPUT_DIR / "EDL.csv"
 DEFAULT_SOURCE_PATH = DEFAULT_INPUT_DIR / "SOURCE.csv"
-DEFAULT_OUTPUT_PATH = Path("output") / "DEF.csv"
+DEFAULT_OUTPUT_PATH = Path("output") / "DEF.xlsx"
 
 # Template headers (comma-delimited CSV format)
 EDL_TEMPLATE_HEADER = "ID,Reel,Name,File Name,Track,Timecode In,Timecode Out,Duration,Source Start,Source End,Audio Channels,Comment\n"
@@ -211,7 +211,7 @@ Examples:
         "-o", "--output",
         type=Path,
         default=None,
-        help="Path for the output definitive list CSV file (default: output/DEF.csv)"
+        help="Path for the output Excel file (default: output/DEF.xlsx)"
     )
 
     parser.add_argument(
@@ -345,11 +345,11 @@ Examples:
         print("-" * 40)
         print("Conversion complete!")
 
-        # Open the Excel output file
-        excel_path = output_path.parent / f"{output_path.stem}.xlsx"
-        if excel_path.exists():
-            print(f"\nOpening {excel_path}...")
-            open_file_in_default_app(excel_path)
+        # Open the output Excel file
+        final_path = output_path if output_path.suffix.lower() == ".xlsx" else output_path.with_suffix(".xlsx")
+        if final_path.exists():
+            print(f"\nOpening {final_path}...")
+            open_file_in_default_app(final_path)
 
         return 0
 

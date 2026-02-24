@@ -75,12 +75,12 @@ class App(ctk.CTk):
             text_color="gray",
         ).grid(row=0, column=1, padx=(0, 8), pady=6)
 
-        # Update button container — allows overlaying the notification dot
-        btn_container = ctk.CTkFrame(top_bar, fg_color="transparent")
-        btn_container.grid(row=0, column=2, padx=(0, 4), pady=6)
+        # Update button container — hidden until an update is available
+        self.update_btn_container = ctk.CTkFrame(top_bar, fg_color="transparent")
+        # Not placed on the grid yet; _show_update_button() will do that.
 
         self.update_btn = ctk.CTkButton(
-            btn_container,
+            self.update_btn_container,
             text="↻  Update",
             width=110,
             height=28,
@@ -90,14 +90,13 @@ class App(ctk.CTk):
 
         # Notification dot — overlaid at top-right corner of button via place()
         self.notif_dot = ctk.CTkLabel(
-            btn_container,
+            self.update_btn_container,
             text="",
             width=12,
             height=12,
             fg_color="#FF5722",
             corner_radius=6,
         )
-        # Hidden initially; use _show_notif_dot() / _hide_notif_dot() to toggle
 
     def _build_ui(self) -> None:
         # Scrollable frame for the entire content
@@ -291,8 +290,8 @@ class App(ctk.CTk):
     def _browse_output(self) -> None:
         path = filedialog.asksaveasfilename(
             title="Save output as...",
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
         )
         if path:
             self.output_var.set(path)
@@ -308,7 +307,7 @@ class App(ctk.CTk):
 
         if not output_path:
             # Default output next to EDL in app data dir
-            output_path = str(get_output_dir() / "DEF.csv")
+            output_path = str(get_output_dir() / "DEF.xlsx")
             self.output_var.set(output_path)
 
         # Validate inputs
@@ -403,7 +402,9 @@ class App(ctk.CTk):
         else:
             self._log("\nDone!")
             # Open the Excel output if it exists
-            excel_path = Path(output_path).with_suffix(".xlsx")
+            excel_path = Path(output_path)
+            if excel_path.suffix.lower() != ".xlsx":
+                excel_path = excel_path.with_suffix(".xlsx")
             if excel_path.exists():
                 self._log(f"Opening {excel_path.name}...")
                 open_file_in_default_app(excel_path)
@@ -415,9 +416,11 @@ class App(ctk.CTk):
     def _on_update_check_result(self, has_update: bool) -> None:
         """Called from the background thread with the version check result."""
         if has_update:
-            self.after(0, self._show_notif_dot)
+            self.after(0, self._show_update_button)
 
-    def _show_notif_dot(self) -> None:
+    def _show_update_button(self) -> None:
+        """Show the update button and notification dot."""
+        self.update_btn_container.grid(row=0, column=2, padx=(0, 4), pady=6)
         self.notif_dot.place(relx=1.0, rely=0.0, x=-6, y=2, anchor="ne")
 
     def _hide_notif_dot(self) -> None:
