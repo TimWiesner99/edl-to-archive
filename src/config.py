@@ -19,8 +19,25 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 EDL_TEMPLATE_HEADER = "ID,Reel,Name,File Name,Track,Timecode In,Timecode Out,Duration,Source Start,Source End,Audio Channels,Comment\n"
 SOURCE_TEMPLATE_HEADER = "TC in,Duur,Bestandsnaam,Omschrijving,Link,Bron,kosten,rechten / contact,to do,Bron in beeld,Aftiteling\n"
 
+DEFAULT_EXCLUSION_RULES = """\
+# Exclude MXF SYNC files
+Bestandsnaam IS "" AND Name INCLUDES ".MXF.SYNC"
+
+# Exclude MP4 SYNC files
+Bestandsnaam IS "" AND Name INCLUDES ".MP4.SYNC"
+
+# Exclude all files with "exclude" in the name
+# Name INCLUDES "exclude"
+
+# Exclude IJSLAND footage
+Name includes "IJSLAND" AND Name includes ".MXF"
+
+# Exclude IJSLAND footage
+(Name includes "A0" OR Name includes "B0") AND Name includes ".MXF"
+"""
+
 DEFAULT_CONFIG = {
-    "exclusion_rules": "",
+    "exclusion_rules": DEFAULT_EXCLUSION_RULES,
     "fps": 25,
     "delimiter": "comma",
     "collapse": True,
