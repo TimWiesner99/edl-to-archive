@@ -23,7 +23,6 @@ from src.config import (
 )
 from src.converter import convert, validate_edl_file, validate_source_file
 from src.exclusion import ExclusionRuleSyntaxError, parse_exclusion_rules
-from src.updater import check_for_update_async, get_current_version, pull_latest
 
 # Appearance
 ctk.set_appearance_mode("system")
@@ -47,61 +46,18 @@ class App(ctk.CTk):
         self.config = load_config()
         ensure_template_files()
 
-        # Row 0: fixed top bar; Row 1: scrollable content
-        self.grid_rowconfigure(0, weight=0)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_top_bar()
         self._build_ui()
         self._load_config_into_ui()
 
-        # Check for updates in background
-        check_for_update_async(self._on_update_check_result)
-
     # ── UI Construction ──────────────────────────────────────────────
-
-    def _build_top_bar(self) -> None:
-        """Build the top bar with version label and update button."""
-        top_bar = ctk.CTkFrame(self, fg_color="transparent")
-        top_bar.grid(row=0, column=0, sticky="ew", padx=10, pady=(6, 0))
-        top_bar.grid_columnconfigure(0, weight=1)  # spacer pushes content right
-
-        # Version label
-        ctk.CTkLabel(
-            top_bar,
-            text=f"v{get_current_version()}",
-            font=ctk.CTkFont(size=12),
-            text_color="gray",
-        ).grid(row=0, column=1, padx=(0, 8), pady=6)
-
-        # Update button container — hidden until an update is available
-        self.update_btn_container = ctk.CTkFrame(top_bar, fg_color="transparent")
-        # Not placed on the grid yet; _show_update_button() will do that.
-
-        self.update_btn = ctk.CTkButton(
-            self.update_btn_container,
-            text="↻  Update",
-            width=110,
-            height=28,
-            command=self._on_update_click,
-        )
-        self.update_btn.pack()
-
-        # Notification dot — overlaid at top-right corner of button via place()
-        self.notif_dot = ctk.CTkLabel(
-            self.update_btn_container,
-            text="",
-            width=12,
-            height=12,
-            fg_color="#FF5722",
-            corner_radius=6,
-        )
 
     def _build_ui(self) -> None:
         # Scrollable frame for the entire content
         container = ctk.CTkScrollableFrame(self)
-        container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         container.grid_columnconfigure(0, weight=1)
 
         row = 0
@@ -410,41 +366,6 @@ class App(ctk.CTk):
                 open_file_in_default_app(excel_path)
 
         self.convert_btn.configure(state="normal", text="Convert")
-
-    # ── Update ────────────────────────────────────────────────────────
-
-    def _on_update_check_result(self, has_update: bool) -> None:
-        """Called from the background thread with the version check result."""
-        if has_update:
-            self.after(0, self._show_update_button)
-
-    def _show_update_button(self) -> None:
-        """Show the update button and notification dot."""
-        self.update_btn_container.grid(row=0, column=2, padx=(0, 4), pady=6)
-        self.notif_dot.place(relx=1.0, rely=0.0, x=-6, y=2, anchor="ne")
-
-    def _hide_notif_dot(self) -> None:
-        self.notif_dot.place_forget()
-
-    def _on_update_click(self) -> None:
-        """Pull the latest version from the main branch."""
-        self.update_btn.configure(state="disabled", text="Pulling...")
-        self._hide_notif_dot()
-        self._log("Pulling latest version from GitHub...")
-        threading.Thread(target=self._run_pull, daemon=True).start()
-
-    def _run_pull(self) -> None:
-        success, output = pull_latest()
-        self.after(0, self._on_pull_done, success, output)
-
-    def _on_pull_done(self, success: bool, output: str) -> None:
-        self.update_btn.configure(state="normal", text="↻  Update")
-        if output:
-            self._log(output)
-        if success:
-            self._log("\nUpdate applied. Please restart the application for changes to take effect.")
-        else:
-            self._log("\nUpdate failed. See output above for details.")
 
     # ── Logging ──────────────────────────────────────────────────────
 
