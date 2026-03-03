@@ -41,6 +41,219 @@ def read_file_with_encoding(filepath: Path) -> tuple[str, str]:
     )
 
 
+# Supported text/CSV extensions (read via pd.read_csv)
+_TEXT_EXTENSIONS = {'.csv', '.tsv', '.txt'}
+
+
+def _detect_csv_delimiter(content: str) -> str:
+    """Pick the best CSV delimiter by inspecting the first 20 lines.
+
+    Checks for tabs vs commas across multiple lines (not just the first)
+    so that preamble rows with no delimiters don't mislead the detection.
+    """
+    lines = content.split('\n')[:20]
+    tab_max = max((line.count('\t') for line in lines), default=0)
+    comma_max = max((line.count(',') for line in lines), default=0)
+    return '\t' if tab_max >= comma_max and tab_max > 0 else ','
+
+
+def _find_header_line_in_text(
+    lines: list[str],
+    delimiter: str,
+    known_columns: set[str],
+    min_matches: int = 2,
+) -> int:
+    """Find the header line index in raw text lines using known column names.
+
+    Scans the first 20 lines, splits each by the delimiter, and picks the
+    line where the most cells match known column names.
+
+    Returns:
+        0-based line index of the best header match, or 0 if nothing found.
+    """
+    max_scan = min(20, len(lines))
+    best_idx = 0
+    best_count = 0
+
+    for i in range(max_scan):
+        cells = [c.strip().strip('"') for c in lines[i].split(delimiter)]
+        match_count = sum(
+            1 for c in cells
+            if c and normalize_column_name(c) in known_columns
+        )
+        if match_count > best_count:
+            best_count = match_count
+            best_idx = i
+
+    return best_idx if best_count >= min_matches else 0
+
+
+def _read_file_as_dataframe(
+    filepath: Path,
+    header: int | None = 0,
+    skiprows: int = 0,
+) -> pd.DataFrame:
+    """Read a file into a DataFrame, dispatching by file extension.
+
+    Args:
+        filepath: Path to the input file
+        header: Row number to use as headers (0 = first row, None = no header).
+        skiprows: Number of leading rows to skip before parsing (CSV only,
+            used to skip preamble when the header row is known).
+
+    Returns:
+        DataFrame with string data types and NaN filled as empty strings
+
+    Raises:
+        ValueError: If the file format is unsupported
+    """
+    suffix = filepath.suffix.lower()
+
+    if suffix == '.xlsx':
+        df = pd.read_excel(filepath, dtype=str, engine='openpyxl', header=header)
+    elif suffix == '.ods':
+        df = pd.read_excel(filepath, dtype=str, engine='odf', header=header)
+    elif suffix in _TEXT_EXTENSIONS:
+        content, encoding = read_file_with_encoding(filepath)
+        delimiter = _detect_csv_delimiter(content)
+        df = pd.read_csv(
+            filepath, delimiter=delimiter, dtype=str,
+            encoding=encoding, header=header, skiprows=skiprows,
+        )
+    else:
+        raise ValueError(
+            f"Unsupported file format: '{suffix}'. "
+            f"Supported formats: .xlsx, .ods, .csv, .tsv"
+        )
+
+    df = df.fillna("")
+    return df
+
+
+def _collect_known_column_names(column_maps: list[dict[str, str]]) -> set[str]:
+    """Collect all known column names from column maps, normalized.
+
+    Args:
+        column_maps: List of column name mappings (key = expected column name)
+
+    Returns:
+        Set of normalized known column names
+    """
+    known: set[str] = set()
+    for cmap in column_maps:
+        for col_name in cmap:
+            known.add(normalize_column_name(col_name))
+    return known
+
+
+def find_header_row(
+    df: pd.DataFrame,
+    known_columns: set[str],
+    min_matches: int = 2,
+) -> int | None:
+    """Find the row that contains column headers by matching known column names.
+
+    Scans the first rows of a headerless DataFrame to find the row where the
+    most cells match known column names. Returns that row's index if it has
+    at least *min_matches* hits, otherwise ``None``.
+
+    Args:
+        df: DataFrame read with ``header=None`` (columns are 0, 1, 2, …)
+        known_columns: Set of normalized known column names
+        min_matches: Minimum number of matching cells required
+
+    Returns:
+        0-based row index of the header row, or None if not found
+    """
+    max_scan_rows = min(20, len(df))
+    best_row: int | None = None
+    best_count = 0
+
+    for row_idx in range(max_scan_rows):
+        row_values = df.iloc[row_idx]
+        match_count = sum(
+            1 for cell in row_values
+            if str(cell).strip()
+            and normalize_column_name(str(cell)) in known_columns
+        )
+        if match_count > best_count:
+            best_count = match_count
+            best_row = row_idx
+
+    if best_count >= min_matches:
+        return best_row
+    return None
+
+
+def read_input_file(
+    filepath: Path,
+    known_columns: set[str] | None = None,
+) -> pd.DataFrame:
+    """Read an input file (CSV, TSV, XLSX, or ODS) into a DataFrame.
+
+    When *known_columns* is provided the function auto-detects which row
+    contains the actual column headers (skipping any preamble rows such as
+    project notes or metadata).  The detected offset is stored in
+    ``df.attrs['header_row_offset']`` so callers can adjust row numbers in
+    error messages.
+
+    Args:
+        filepath: Path to the input file
+        known_columns: Optional set of normalized column names used to
+            detect the header row.  When ``None``, the first row is used.
+
+    Returns:
+        DataFrame with string data types and NaN filled as empty strings
+
+    Raises:
+        ValueError: If the file format is unsupported
+        UnicodeDecodeError: If CSV encoding cannot be determined
+    """
+    filepath = Path(filepath)
+    suffix = filepath.suffix.lower()
+
+    if known_columns is None:
+        # Original fast path — first row is the header
+        df = _read_file_as_dataframe(filepath, header=0)
+        df.attrs['header_row_offset'] = 0
+        return df
+
+    # --- Header auto-detection path ---
+
+    if suffix in _TEXT_EXTENSIONS:
+        # For CSV/TSV: detect header row from raw text, then read with skiprows
+        # (avoids pandas column-count mismatch when preamble rows have fewer fields)
+        content, encoding = read_file_with_encoding(filepath)
+        delimiter = _detect_csv_delimiter(content)
+        lines = [l for l in content.split('\n') if l.strip()]
+        offset = _find_header_line_in_text(lines, delimiter, known_columns)
+
+        df = pd.read_csv(
+            filepath, delimiter=delimiter, dtype=str,
+            encoding=encoding, header=0, skiprows=range(offset),
+        )
+        df = df.fillna("")
+        df.attrs['header_row_offset'] = offset
+        return df
+
+    # For spreadsheets (xlsx, ods): read without header, scan DataFrame
+    df_raw = _read_file_as_dataframe(filepath, header=None)
+
+    if df_raw.empty:
+        df_raw.attrs['header_row_offset'] = 0
+        return df_raw
+
+    header_row = find_header_row(df_raw, known_columns)
+    offset = header_row if header_row is not None else 0
+
+    # Use the detected (or fallback) row as column headers
+    new_headers = [str(v).strip() for v in df_raw.iloc[offset]]
+    df = df_raw.iloc[offset + 1:].reset_index(drop=True)
+    df.columns = new_headers
+    df.attrs['header_row_offset'] = offset
+    return df
+
+
 # Column name mappings: English -> internal name
 EDL_COLUMN_MAP = {
     # English names (from AVID/Premiere)
@@ -142,10 +355,10 @@ def map_columns(df: pd.DataFrame, column_maps: list[dict[str, str]]) -> pd.DataF
 
 
 def load_edl(filepath: Path | str, fps: int = 25) -> list[EDLEntry]:
-    """Load an EDL from a CSV file.
+    """Load an EDL from a CSV or Excel file.
 
     Args:
-        filepath: Path to the EDL CSV file
+        filepath: Path to the EDL file (.csv, .tsv, .xlsx, or .ods)
         fps: Frame rate for timecode parsing
 
     Returns:
@@ -153,14 +366,8 @@ def load_edl(filepath: Path | str, fps: int = 25) -> list[EDLEntry]:
     """
     filepath = Path(filepath)
 
-    # Read file with encoding detection
-    content, encoding = read_file_with_encoding(filepath)
-    first_line = content.split('\n')[0] if content else ''
-
-    delimiter = '\t' if '\t' in first_line else ','
-
-    df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
-    df = df.fillna("")
+    known = _collect_known_column_names([EDL_COLUMN_MAP, EDL_DUTCH_MAP])
+    df = read_input_file(filepath, known_columns=known)
 
     # Map columns
     df = map_columns(df, [EDL_COLUMN_MAP, EDL_DUTCH_MAP])
@@ -185,10 +392,10 @@ def load_edl(filepath: Path | str, fps: int = 25) -> list[EDLEntry]:
 
 
 def load_source(filepath: Path | str) -> list[SourceEntry]:
-    """Load a source list from a CSV file.
+    """Load a source list from a CSV or Excel file.
 
     Args:
-        filepath: Path to the source CSV file
+        filepath: Path to the source file (.csv, .tsv, .xlsx, or .ods)
 
     Returns:
         List of SourceEntry objects
@@ -198,16 +405,11 @@ def load_source(filepath: Path | str) -> list[SourceEntry]:
     """
     filepath = Path(filepath)
 
-    # Read file with encoding detection
-    content, encoding = read_file_with_encoding(filepath)
-    first_line = content.split('\n')[0] if content else ''
-
-    delimiter = '\t' if '\t' in first_line else ','
-
-    df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
-    df = df.fillna("")
+    known = _collect_known_column_names([SOURCE_COLUMN_MAP, SOURCE_ENGLISH_MAP])
+    df = read_input_file(filepath, known_columns=known)
 
     # Map columns
+    header_offset = df.attrs.get('header_row_offset', 0)
     df = map_columns(df, [SOURCE_COLUMN_MAP, SOURCE_ENGLISH_MAP])
 
     entries = []
@@ -219,8 +421,9 @@ def load_source(filepath: Path | str) -> list[SourceEntry]:
         if not name or name.strip() == "":
             continue
 
-        # Row number for error messages (add 2: 1 for header, 1 for 0-indexing)
-        row_number = idx + 2
+        # Row number for error messages (add 2: 1 for header, 1 for 0-indexing,
+        # plus any preamble rows that were skipped)
+        row_number = idx + 2 + header_offset
 
         try:
             entry = SourceEntry.from_dict(row_dict, row_number=row_number)
@@ -241,7 +444,7 @@ def validate_edl_file(filepath: Path | str, fps: int = 25) -> list[str]:
     - Timecodes are parseable
 
     Args:
-        filepath: Path to the EDL CSV file
+        filepath: Path to the EDL file (.csv, .tsv, .xlsx, or .ods)
         fps: Frame rate for timecode validation
 
     Returns:
@@ -251,23 +454,17 @@ def validate_edl_file(filepath: Path | str, fps: int = 25) -> list[str]:
     errors = []
 
     try:
-        content, encoding = read_file_with_encoding(filepath)
-    except UnicodeDecodeError:
-        return ["Could not read file with any supported encoding."]
-
-    lines = [l for l in content.strip().split('\n') if l.strip()]
-    if len(lines) < 1:
-        return ["File is empty."]
-
-    first_line = lines[0]
-    delimiter = '\t' if '\t' in first_line else ','
-
-    try:
-        df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
+        known = _collect_known_column_names([EDL_COLUMN_MAP, EDL_DUTCH_MAP])
+        df = read_input_file(filepath, known_columns=known)
+    except (UnicodeDecodeError, ValueError) as e:
+        return [f"Could not read file: {e}"]
     except Exception as e:
-        return [f"Could not parse CSV: {e}"]
+        return [f"Could not parse file: {e}"]
 
-    df = df.fillna("")
+    if df.empty:
+        return ["File is empty or contains only headers."]
+
+    header_offset = df.attrs.get('header_row_offset', 0)
     df = map_columns(df, [EDL_COLUMN_MAP, EDL_DUTCH_MAP])
 
     # Check required columns
@@ -292,7 +489,7 @@ def validate_edl_file(filepath: Path | str, fps: int = 25) -> list[str]:
             val = str(row.get(col, "")).strip()
             if val and val != "00:00:00:00":
                 if not Timecode.TIMECODE_PATTERN.match(val):
-                    errors.append(f"Row {idx + 2}, column '{col}': invalid timecode format '{val}' (expected HH:MM:SS:FF)")
+                    errors.append(f"Row {idx + 2 + header_offset}, column '{col}': invalid timecode format '{val}' (expected HH:MM:SS:FF)")
 
     return errors
 
@@ -305,7 +502,7 @@ def validate_source_file(filepath: Path | str) -> list[str]:
     - Required 'name'/'Bestandsnaam' column is present
 
     Args:
-        filepath: Path to the source CSV file
+        filepath: Path to the source file (.csv, .tsv, .xlsx, or .ods)
 
     Returns:
         List of error messages (empty if valid)
@@ -314,23 +511,15 @@ def validate_source_file(filepath: Path | str) -> list[str]:
     errors = []
 
     try:
-        content, encoding = read_file_with_encoding(filepath)
-    except UnicodeDecodeError:
-        return ["Could not read file with any supported encoding."]
-
-    lines = [l for l in content.strip().split('\n') if l.strip()]
-    if len(lines) < 1:
-        return ["File is empty."]
-
-    first_line = lines[0]
-    delimiter = '\t' if '\t' in first_line else ','
-
-    try:
-        df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
+        known = _collect_known_column_names([SOURCE_COLUMN_MAP, SOURCE_ENGLISH_MAP])
+        df = read_input_file(filepath, known_columns=known)
+    except (UnicodeDecodeError, ValueError) as e:
+        return [f"Could not read file: {e}"]
     except Exception as e:
-        return [f"Could not parse CSV: {e}"]
+        return [f"Could not parse file: {e}"]
 
-    df = df.fillna("")
+    if df.empty:
+        return ["File is empty or contains only headers."]
     df = map_columns(df, [SOURCE_COLUMN_MAP, SOURCE_ENGLISH_MAP])
 
     # Check required column
@@ -636,22 +825,23 @@ def save_def_list(
     df.to_csv(output_path, sep=delimiter, index=False)
 
 
-def read_raw_csv(filepath: Path | str) -> pd.DataFrame:
-    """Read a CSV file as-is, preserving original column names and data.
+def read_raw_input(
+    filepath: Path | str,
+    known_columns: set[str] | None = None,
+) -> pd.DataFrame:
+    """Read an input file as-is, preserving original column names and data.
+
+    Supports CSV, TSV, XLSX, and ODS formats.  When *known_columns* is
+    provided, preamble rows before the header are skipped.
 
     Args:
-        filepath: Path to the CSV file
+        filepath: Path to the input file
+        known_columns: Optional set of normalized column names for header detection
 
     Returns:
         DataFrame with original column names and string data
     """
-    filepath = Path(filepath)
-    content, encoding = read_file_with_encoding(filepath)
-    first_line = content.split('\n')[0] if content else ''
-    delimiter = '\t' if '\t' in first_line else ','
-    df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
-    df = df.fillna("")
-    return df
+    return read_input_file(Path(filepath), known_columns=known_columns)
 
 
 def save_excel_output(
@@ -677,9 +867,11 @@ def save_excel_output(
     """
     output_path = Path(output_path)
 
-    # Read raw input files
-    edl_raw = read_raw_csv(edl_path)
-    source_raw = read_raw_csv(source_path)
+    # Read raw input files (with header detection to skip preamble)
+    edl_known = _collect_known_column_names([EDL_COLUMN_MAP, EDL_DUTCH_MAP])
+    source_known = _collect_known_column_names([SOURCE_COLUMN_MAP, SOURCE_ENGLISH_MAP])
+    edl_raw = read_raw_input(edl_path, known_columns=edl_known)
+    source_raw = read_raw_input(source_path, known_columns=source_known)
 
     # Build DEF DataFrame
     def_rows = [entry.to_dict(include_frames=include_frames) for entry in def_list]
@@ -767,7 +959,6 @@ def convert(
     output_path: Path | str,
     fps: int = 25,
     collapse: bool = True,
-    delimiter: str = ',',
     exclusion_rules: ExclusionRuleSet | None = None,
     verbose: bool = False,
     verbose_level: int = 1,
@@ -776,12 +967,11 @@ def convert(
     """Main conversion function: EDL + Source -> Definitive List.
 
     Args:
-        edl_path: Path to the EDL CSV file
-        source_path: Path to the source list CSV file
-        output_path: Path for the output DEF list
+        edl_path: Path to the EDL file (.csv, .tsv, .xlsx, or .ods)
+        source_path: Path to the source list file (.csv, .tsv, .xlsx, or .ods)
+        output_path: Path for the output Excel file (.xlsx)
         fps: Frame rate for timecode handling
         collapse: Whether to collapse consecutive same-name entries
-        delimiter: Output file delimiter
         exclusion_rules: Optional exclusion rules to filter entries before processing
         verbose: If True, print detailed progress for each entry
         verbose_level: 1 = basic output, 2 = detailed evaluation traces

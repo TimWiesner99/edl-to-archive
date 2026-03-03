@@ -4,9 +4,12 @@
 Converts Edit Decision Lists (EDL) from AVID/Premiere Pro and source archive
 lists from image researchers into a definitive archive list.
 
+Supports .xlsx, .ods, .csv, and .tsv input files. Excel (.xlsx) is recommended
+for reliable cross-platform compatibility (Mac and Windows).
+
 Usage:
     python main.py <edl_file> <source_file> -o <output_file>
-    python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv
+    python main.py input/EDL.xlsx input/SOURCE.xlsx -o output/DEF.xlsx
     python main.py   # Interactive mode: creates template files for you to fill in
 """
 
@@ -16,19 +19,29 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 from src.converter import convert, validate_edl_file, validate_source_file
 from src.exclusion import load_exclusion_rules, ExclusionRuleSyntaxError
 
 
 # Default paths for interactive mode
 DEFAULT_INPUT_DIR = Path("input")
-DEFAULT_EDL_PATH = DEFAULT_INPUT_DIR / "EDL.csv"
-DEFAULT_SOURCE_PATH = DEFAULT_INPUT_DIR / "SOURCE.csv"
+DEFAULT_EDL_PATH = DEFAULT_INPUT_DIR / "EDL.xlsx"
+DEFAULT_SOURCE_PATH = DEFAULT_INPUT_DIR / "SOURCE.xlsx"
 DEFAULT_OUTPUT_PATH = Path("output") / "DEF.xlsx"
 
-# Template headers (comma-delimited CSV format)
-EDL_TEMPLATE_HEADER = "ID,Reel,Name,File Name,Track,Timecode In,Timecode Out,Duration,Source Start,Source End,Audio Channels,Comment\n"
-SOURCE_TEMPLATE_HEADER = "TC in,Duur,Bestandsnaam,Omschrijving,Link,Bron,kosten,rechten / contact,to do,Bron in beeld,Aftiteling\n"
+# Template column headers
+EDL_TEMPLATE_COLUMNS = [
+    "ID", "Reel", "Name", "File Name", "Track",
+    "Timecode In", "Timecode Out", "Duration",
+    "Source Start", "Source End", "Audio Channels", "Comment",
+]
+SOURCE_TEMPLATE_COLUMNS = [
+    "TC in", "Duur", "Bestandsnaam", "Omschrijving", "Link",
+    "Bron", "kosten", "rechten / contact", "to do",
+    "Bron in beeld", "Aftiteling",
+]
 
 
 def open_file_in_default_app(filepath: Path) -> bool:
@@ -53,37 +66,30 @@ def open_file_in_default_app(filepath: Path) -> bool:
         return False
 
 
-def create_template_file(filepath: Path, header: str) -> bool:
-    """Create a template CSV file with only the header row.
+def create_template_file(filepath: Path, columns: list[str]) -> bool:
+    """Create a template Excel file with only the header row.
 
-    Only creates the file if it doesn't exist or is empty.
+    Only creates the file if it doesn't exist or has no data rows.
 
     Args:
-        filepath: Path for the template file
-        header: Header row content
+        filepath: Path for the template file (.xlsx)
+        columns: List of column header names
 
     Returns:
         True if a new template was created, False if file already had content
     """
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    # If file exists and has content beyond the header, don't overwrite
     if filepath.exists():
-        # Try UTF-8 first, fall back to Windows-1252 (common on Windows)
-        for encoding in ("utf-8", "cp1252"):
-            try:
-                content = filepath.read_text(encoding=encoding).strip()
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            # If all encodings fail, read with error replacement
-            content = filepath.read_text(encoding="utf-8", errors="replace").strip()
+        try:
+            df = pd.read_excel(filepath, dtype=str, engine='openpyxl')
+            if len(df) > 0:
+                return False  # Has data rows, don't overwrite
+        except Exception:
+            pass  # File is corrupt or unreadable, recreate it
 
-        if content and content != header.strip():
-            return False
-
-    filepath.write_text(header, encoding="utf-8")
+    df = pd.DataFrame(columns=columns)
+    df.to_excel(filepath, index=False, engine="xlsxwriter")
     return True
 
 
@@ -101,8 +107,8 @@ def interactive_input_flow(edl_path: Path, source_path: Path, fps: int) -> bool:
     print("\nNo input files provided. Setting up interactive input...\n")
 
     # Create template files
-    edl_created = create_template_file(edl_path, EDL_TEMPLATE_HEADER)
-    source_created = create_template_file(source_path, SOURCE_TEMPLATE_HEADER)
+    edl_created = create_template_file(edl_path, EDL_TEMPLATE_COLUMNS)
+    source_created = create_template_file(source_path, SOURCE_TEMPLATE_COLUMNS)
 
     if edl_created:
         print(f"  Created EDL template:    {edl_path}")
@@ -179,13 +185,16 @@ Examples:
     python main.py
 
     # Basic conversion with default settings (25 fps)
-    python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv
+    python main.py input/EDL.xlsx input/SOURCE.xlsx -o output/DEF.xlsx
 
     # Convert with different frame rate
-    python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --fps 24
+    python main.py input/EDL.xlsx input/SOURCE.xlsx -o output/DEF.xlsx --fps 24
 
     # Without collapsing consecutive entries
-    python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.csv --no-collapse
+    python main.py input/EDL.xlsx input/SOURCE.xlsx -o output/DEF.xlsx --no-collapse
+
+    # Also supports CSV/TSV input for backward compatibility
+    python main.py input/EDL.csv input/SOURCE.csv -o output/DEF.xlsx
         """
     )
 
@@ -194,7 +203,7 @@ Examples:
         type=Path,
         nargs="?",
         default=None,
-        help="Path to the EDL CSV file (from AVID/Premiere Pro). "
+        help="Path to the EDL file (.xlsx, .ods, .csv, or .tsv). "
              "If omitted, interactive mode is used."
     )
 
@@ -203,7 +212,7 @@ Examples:
         type=Path,
         nargs="?",
         default=None,
-        help="Path to the source archive list CSV file (from image researcher). "
+        help="Path to the source archive list file (.xlsx, .ods, .csv, or .tsv). "
              "If omitted, interactive mode is used."
     )
 
@@ -225,13 +234,6 @@ Examples:
         "--no-collapse",
         action="store_true",
         help="Don't collapse consecutive entries with the same name"
-    )
-
-    parser.add_argument(
-        "--delimiter",
-        choices=["tab", "comma"],
-        default="comma",
-        help="Output file delimiter (default: comma)"
     )
 
     parser.add_argument(
@@ -304,9 +306,6 @@ Examples:
     # Create output directory if needed
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Determine delimiter
-    delimiter = '\t' if args.delimiter == "tab" else ','
-
     # Load exclusion rules if provided
     exclusion_rules = None
     if args.exclude:
@@ -335,7 +334,6 @@ Examples:
             output_path=output_path,
             fps=args.fps,
             collapse=not args.no_collapse,
-            delimiter=delimiter,
             exclusion_rules=exclusion_rules,
             verbose=args.verbose > 0,
             verbose_level=args.verbose,
