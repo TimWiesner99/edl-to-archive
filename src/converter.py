@@ -41,6 +41,57 @@ def read_file_with_encoding(filepath: Path) -> tuple[str, str]:
     )
 
 
+# Supported spreadsheet extensions (read via pd.read_excel)
+_SPREADSHEET_EXTENSIONS = {'.xlsx', '.ods'}
+
+# Supported text/CSV extensions (read via pd.read_csv)
+_TEXT_EXTENSIONS = {'.csv', '.tsv', '.txt'}
+
+
+def read_input_file(filepath: Path) -> pd.DataFrame:
+    """Read an input file (CSV, TSV, XLSX, or ODS) into a DataFrame.
+
+    Dispatches based on file extension:
+    - .xlsx: Uses pd.read_excel() with openpyxl engine
+    - .ods:  Uses pd.read_excel() with odf engine
+    - .csv/.tsv/.txt: Uses pd.read_csv() with encoding detection and
+      automatic delimiter detection (tab vs comma)
+
+    Args:
+        filepath: Path to the input file
+
+    Returns:
+        DataFrame with string data types and NaN filled as empty strings
+
+    Raises:
+        ValueError: If the file format is unsupported
+        UnicodeDecodeError: If CSV encoding cannot be determined
+    """
+    filepath = Path(filepath)
+    suffix = filepath.suffix.lower()
+
+    if suffix == '.xlsx':
+        df = pd.read_excel(filepath, dtype=str, engine='openpyxl')
+        df = df.fillna("")
+        return df
+    elif suffix == '.ods':
+        df = pd.read_excel(filepath, dtype=str, engine='odf')
+        df = df.fillna("")
+        return df
+    elif suffix in _TEXT_EXTENSIONS:
+        content, encoding = read_file_with_encoding(filepath)
+        first_line = content.split('\n')[0] if content else ''
+        delimiter = '\t' if '\t' in first_line else ','
+        df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
+        df = df.fillna("")
+        return df
+    else:
+        raise ValueError(
+            f"Unsupported file format: '{suffix}'. "
+            f"Supported formats: .xlsx, .ods, .csv, .tsv"
+        )
+
+
 # Column name mappings: English -> internal name
 EDL_COLUMN_MAP = {
     # English names (from AVID/Premiere)
@@ -142,10 +193,10 @@ def map_columns(df: pd.DataFrame, column_maps: list[dict[str, str]]) -> pd.DataF
 
 
 def load_edl(filepath: Path | str, fps: int = 25) -> list[EDLEntry]:
-    """Load an EDL from a CSV file.
+    """Load an EDL from a CSV or Excel file.
 
     Args:
-        filepath: Path to the EDL CSV file
+        filepath: Path to the EDL file (.csv, .tsv, .xlsx, or .ods)
         fps: Frame rate for timecode parsing
 
     Returns:
@@ -153,14 +204,7 @@ def load_edl(filepath: Path | str, fps: int = 25) -> list[EDLEntry]:
     """
     filepath = Path(filepath)
 
-    # Read file with encoding detection
-    content, encoding = read_file_with_encoding(filepath)
-    first_line = content.split('\n')[0] if content else ''
-
-    delimiter = '\t' if '\t' in first_line else ','
-
-    df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
-    df = df.fillna("")
+    df = read_input_file(filepath)
 
     # Map columns
     df = map_columns(df, [EDL_COLUMN_MAP, EDL_DUTCH_MAP])
@@ -185,10 +229,10 @@ def load_edl(filepath: Path | str, fps: int = 25) -> list[EDLEntry]:
 
 
 def load_source(filepath: Path | str) -> list[SourceEntry]:
-    """Load a source list from a CSV file.
+    """Load a source list from a CSV or Excel file.
 
     Args:
-        filepath: Path to the source CSV file
+        filepath: Path to the source file (.csv, .tsv, .xlsx, or .ods)
 
     Returns:
         List of SourceEntry objects
@@ -198,14 +242,7 @@ def load_source(filepath: Path | str) -> list[SourceEntry]:
     """
     filepath = Path(filepath)
 
-    # Read file with encoding detection
-    content, encoding = read_file_with_encoding(filepath)
-    first_line = content.split('\n')[0] if content else ''
-
-    delimiter = '\t' if '\t' in first_line else ','
-
-    df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
-    df = df.fillna("")
+    df = read_input_file(filepath)
 
     # Map columns
     df = map_columns(df, [SOURCE_COLUMN_MAP, SOURCE_ENGLISH_MAP])
@@ -241,7 +278,7 @@ def validate_edl_file(filepath: Path | str, fps: int = 25) -> list[str]:
     - Timecodes are parseable
 
     Args:
-        filepath: Path to the EDL CSV file
+        filepath: Path to the EDL file (.csv, .tsv, .xlsx, or .ods)
         fps: Frame rate for timecode validation
 
     Returns:
@@ -251,23 +288,14 @@ def validate_edl_file(filepath: Path | str, fps: int = 25) -> list[str]:
     errors = []
 
     try:
-        content, encoding = read_file_with_encoding(filepath)
-    except UnicodeDecodeError:
-        return ["Could not read file with any supported encoding."]
-
-    lines = [l for l in content.strip().split('\n') if l.strip()]
-    if len(lines) < 1:
-        return ["File is empty."]
-
-    first_line = lines[0]
-    delimiter = '\t' if '\t' in first_line else ','
-
-    try:
-        df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
+        df = read_input_file(filepath)
+    except (UnicodeDecodeError, ValueError) as e:
+        return [f"Could not read file: {e}"]
     except Exception as e:
-        return [f"Could not parse CSV: {e}"]
+        return [f"Could not parse file: {e}"]
 
-    df = df.fillna("")
+    if df.empty:
+        return ["File is empty or contains only headers."]
     df = map_columns(df, [EDL_COLUMN_MAP, EDL_DUTCH_MAP])
 
     # Check required columns
@@ -305,7 +333,7 @@ def validate_source_file(filepath: Path | str) -> list[str]:
     - Required 'name'/'Bestandsnaam' column is present
 
     Args:
-        filepath: Path to the source CSV file
+        filepath: Path to the source file (.csv, .tsv, .xlsx, or .ods)
 
     Returns:
         List of error messages (empty if valid)
@@ -314,23 +342,14 @@ def validate_source_file(filepath: Path | str) -> list[str]:
     errors = []
 
     try:
-        content, encoding = read_file_with_encoding(filepath)
-    except UnicodeDecodeError:
-        return ["Could not read file with any supported encoding."]
-
-    lines = [l for l in content.strip().split('\n') if l.strip()]
-    if len(lines) < 1:
-        return ["File is empty."]
-
-    first_line = lines[0]
-    delimiter = '\t' if '\t' in first_line else ','
-
-    try:
-        df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
+        df = read_input_file(filepath)
+    except (UnicodeDecodeError, ValueError) as e:
+        return [f"Could not read file: {e}"]
     except Exception as e:
-        return [f"Could not parse CSV: {e}"]
+        return [f"Could not parse file: {e}"]
 
-    df = df.fillna("")
+    if df.empty:
+        return ["File is empty or contains only headers."]
     df = map_columns(df, [SOURCE_COLUMN_MAP, SOURCE_ENGLISH_MAP])
 
     # Check required column
@@ -636,22 +655,18 @@ def save_def_list(
     df.to_csv(output_path, sep=delimiter, index=False)
 
 
-def read_raw_csv(filepath: Path | str) -> pd.DataFrame:
-    """Read a CSV file as-is, preserving original column names and data.
+def read_raw_input(filepath: Path | str) -> pd.DataFrame:
+    """Read an input file as-is, preserving original column names and data.
+
+    Supports CSV, TSV, XLSX, and ODS formats.
 
     Args:
-        filepath: Path to the CSV file
+        filepath: Path to the input file
 
     Returns:
         DataFrame with original column names and string data
     """
-    filepath = Path(filepath)
-    content, encoding = read_file_with_encoding(filepath)
-    first_line = content.split('\n')[0] if content else ''
-    delimiter = '\t' if '\t' in first_line else ','
-    df = pd.read_csv(filepath, delimiter=delimiter, dtype=str, encoding=encoding)
-    df = df.fillna("")
-    return df
+    return read_input_file(Path(filepath))
 
 
 def save_excel_output(
@@ -678,8 +693,8 @@ def save_excel_output(
     output_path = Path(output_path)
 
     # Read raw input files
-    edl_raw = read_raw_csv(edl_path)
-    source_raw = read_raw_csv(source_path)
+    edl_raw = read_raw_input(edl_path)
+    source_raw = read_raw_input(source_path)
 
     # Build DEF DataFrame
     def_rows = [entry.to_dict(include_frames=include_frames) for entry in def_list]
@@ -767,7 +782,6 @@ def convert(
     output_path: Path | str,
     fps: int = 25,
     collapse: bool = True,
-    delimiter: str = ',',
     exclusion_rules: ExclusionRuleSet | None = None,
     verbose: bool = False,
     verbose_level: int = 1,
@@ -776,12 +790,11 @@ def convert(
     """Main conversion function: EDL + Source -> Definitive List.
 
     Args:
-        edl_path: Path to the EDL CSV file
-        source_path: Path to the source list CSV file
-        output_path: Path for the output DEF list
+        edl_path: Path to the EDL file (.csv, .tsv, .xlsx, or .ods)
+        source_path: Path to the source list file (.csv, .tsv, .xlsx, or .ods)
+        output_path: Path for the output Excel file (.xlsx)
         fps: Frame rate for timecode handling
         collapse: Whether to collapse consecutive same-name entries
-        delimiter: Output file delimiter
         exclusion_rules: Optional exclusion rules to filter entries before processing
         verbose: If True, print detailed progress for each entry
         verbose_level: 1 = basic output, 2 = detailed evaluation traces

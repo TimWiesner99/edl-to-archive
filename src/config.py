@@ -11,13 +11,23 @@ import platform
 import subprocess
 from pathlib import Path
 
+import pandas as pd
+
 # Project root is the parent of the src/ directory where this file lives.
 # This works regardless of the current working directory.
 _PROJECT_ROOT = Path(__file__).parent.parent
 
-# Template headers (comma-delimited CSV format)
-EDL_TEMPLATE_HEADER = "ID,Reel,Name,File Name,Track,Timecode In,Timecode Out,Duration,Source Start,Source End,Audio Channels,Comment\n"
-SOURCE_TEMPLATE_HEADER = "TC in,Duur,Bestandsnaam,Omschrijving,Link,Bron,kosten,rechten / contact,to do,Bron in beeld,Aftiteling\n"
+# Template column headers
+EDL_TEMPLATE_COLUMNS = [
+    "ID", "Reel", "Name", "File Name", "Track",
+    "Timecode In", "Timecode Out", "Duration",
+    "Source Start", "Source End", "Audio Channels", "Comment",
+]
+SOURCE_TEMPLATE_COLUMNS = [
+    "TC in", "Duur", "Bestandsnaam", "Omschrijving", "Link",
+    "Bron", "kosten", "rechten / contact", "to do",
+    "Bron in beeld", "Aftiteling",
+]
 
 DEFAULT_EXCLUSION_RULES = """\
 # Exclude MXF SYNC files
@@ -39,7 +49,6 @@ Name includes "IJSLAND" AND Name includes ".MXF"
 DEFAULT_CONFIG = {
     "exclusion_rules": DEFAULT_EXCLUSION_RULES,
     "fps": 25,
-    "delimiter": "comma",
     "collapse": True,
     "frames": False,
     "output_path": "",
@@ -95,35 +104,69 @@ def save_config(config: dict) -> None:
 
 
 def get_edl_path() -> Path:
-    """Get the path for the EDL file (input/ inside the project)."""
-    return _PROJECT_ROOT / "input" / "EDL.csv"
+    """Get the path for the EDL file (input/ inside the project).
+
+    Prefers .xlsx if it exists, falls back to .csv for backward compatibility.
+    If neither exists, returns the .xlsx path (for template creation).
+    """
+    input_dir = _PROJECT_ROOT / "input"
+    xlsx_path = input_dir / "EDL.xlsx"
+    csv_path = input_dir / "EDL.csv"
+
+    if xlsx_path.exists():
+        return xlsx_path
+    if csv_path.exists():
+        return csv_path
+    return xlsx_path
 
 
 def get_source_path() -> Path:
-    """Get the path for the Source file (input/ inside the project)."""
-    return _PROJECT_ROOT / "input" / "SOURCE.csv"
+    """Get the path for the Source file (input/ inside the project).
+
+    Prefers .xlsx if it exists, falls back to .csv for backward compatibility.
+    If neither exists, returns the .xlsx path (for template creation).
+    """
+    input_dir = _PROJECT_ROOT / "input"
+    xlsx_path = input_dir / "SOURCE.xlsx"
+    csv_path = input_dir / "SOURCE.csv"
+
+    if xlsx_path.exists():
+        return xlsx_path
+    if csv_path.exists():
+        return csv_path
+    return xlsx_path
 
 
 def ensure_template_files() -> tuple[bool, bool]:
-    """Create template EDL and Source CSV files if they don't exist.
+    """Create template EDL and Source Excel files if they don't exist.
+
+    Checks for both .xlsx and .csv versions; only creates a new .xlsx
+    template if neither format exists for a given input file.
 
     Returns:
         Tuple of (edl_created, source_created) booleans.
     """
-    edl_created = _create_template_if_missing(get_edl_path(), EDL_TEMPLATE_HEADER)
-    source_created = _create_template_if_missing(get_source_path(), SOURCE_TEMPLATE_HEADER)
+    edl_path = get_edl_path()
+    source_path = get_source_path()
+
+    edl_created = _create_xlsx_template_if_missing(edl_path, EDL_TEMPLATE_COLUMNS)
+    source_created = _create_xlsx_template_if_missing(source_path, SOURCE_TEMPLATE_COLUMNS)
     return edl_created, source_created
 
 
 def reset_template_file(path: Path) -> None:
-    """Overwrite a file with a fresh template header."""
-    if path == get_edl_path():
-        header = EDL_TEMPLATE_HEADER
-    elif path == get_source_path():
-        header = SOURCE_TEMPLATE_HEADER
+    """Overwrite a file with a fresh template."""
+    edl_path = get_edl_path()
+    source_path = get_source_path()
+
+    if path == edl_path:
+        columns = EDL_TEMPLATE_COLUMNS
+    elif path == source_path:
+        columns = SOURCE_TEMPLATE_COLUMNS
     else:
         raise ValueError(f"Unknown template path: {path}")
-    path.write_text(header, encoding="utf-8")
+
+    _write_xlsx_template(path, columns)
 
 
 def open_file_in_default_app(filepath: Path) -> bool:
@@ -145,10 +188,16 @@ def open_file_in_default_app(filepath: Path) -> bool:
         return False
 
 
-def _create_template_if_missing(path: Path, header: str) -> bool:
-    """Create a template file if it doesn't exist. Returns True if created."""
+def _write_xlsx_template(path: Path, columns: list[str]) -> None:
+    """Write an empty .xlsx template with the given column headers."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(columns=columns)
+    df.to_excel(path, index=False, engine="xlsxwriter")
+
+
+def _create_xlsx_template_if_missing(path: Path, columns: list[str]) -> bool:
+    """Create an .xlsx template file if it doesn't exist. Returns True if created."""
     if path.exists():
         return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(header, encoding="utf-8")
+    _write_xlsx_template(path, columns)
     return True

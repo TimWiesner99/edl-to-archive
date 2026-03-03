@@ -29,7 +29,16 @@ ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("blue")
 
 FPS_OPTIONS = ["24", "25", "30", "50", "60"]
-DELIMITER_OPTIONS = ["comma", "tab"]
+
+# Supported file types for input file dialogs
+INPUT_FILETYPES = [
+    ("All supported", "*.xlsx *.ods *.csv *.tsv"),
+    ("Excel files", "*.xlsx"),
+    ("ODS files", "*.ods"),
+    ("CSV files", "*.csv"),
+    ("TSV files", "*.tsv"),
+    ("All files", "*.*"),
+]
 
 
 class App(ctk.CTk):
@@ -70,6 +79,10 @@ class App(ctk.CTk):
         input_label.grid(row=row, column=0, sticky="w", pady=(0, 5))
         row += 1
 
+        # Track custom file paths (None = use default from config)
+        self._custom_edl_path: Path | None = None
+        self._custom_source_path: Path | None = None
+
         # EDL file
         edl_frame = ctk.CTkFrame(container)
         edl_frame.grid(row=row, column=0, sticky="ew", pady=2)
@@ -85,8 +98,12 @@ class App(ctk.CTk):
         edl_btn_frame = ctk.CTkFrame(edl_frame, fg_color="transparent")
         edl_btn_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=(0, 5))
         ctk.CTkButton(
+            edl_btn_frame, text="Browse...", width=100,
+            command=self._browse_edl,
+        ).pack(side="left", padx=(0, 5))
+        ctk.CTkButton(
             edl_btn_frame, text="Open in Editor", width=130,
-            command=lambda: open_file_in_default_app(get_edl_path()),
+            command=lambda: open_file_in_default_app(self._get_edl_path()),
         ).pack(side="left", padx=(0, 5))
         ctk.CTkButton(
             edl_btn_frame, text="Reset to Template", width=130,
@@ -110,8 +127,12 @@ class App(ctk.CTk):
         source_btn_frame = ctk.CTkFrame(source_frame, fg_color="transparent")
         source_btn_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=(0, 5))
         ctk.CTkButton(
+            source_btn_frame, text="Browse...", width=100,
+            command=self._browse_source,
+        ).pack(side="left", padx=(0, 5))
+        ctk.CTkButton(
             source_btn_frame, text="Open in Editor", width=130,
-            command=lambda: open_file_in_default_app(get_source_path()),
+            command=lambda: open_file_in_default_app(self._get_source_path()),
         ).pack(side="left", padx=(0, 5))
         ctk.CTkButton(
             source_btn_frame, text="Reset to Template", width=130,
@@ -138,26 +159,20 @@ class App(ctk.CTk):
         self.fps_menu = ctk.CTkOptionMenu(opts_frame, variable=self.fps_var, values=FPS_OPTIONS, width=100)
         self.fps_menu.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
-        # Delimiter
-        ctk.CTkLabel(opts_frame, text="Delimiter:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.delimiter_var = ctk.StringVar(value="comma")
-        self.delimiter_menu = ctk.CTkOptionMenu(opts_frame, variable=self.delimiter_var, values=DELIMITER_OPTIONS, width=100)
-        self.delimiter_menu.grid(row=1, column=1, padx=5, pady=5, sticky="w")
-
         # Collapse checkbox
         self.collapse_var = ctk.BooleanVar(value=True)
         self.collapse_cb = ctk.CTkCheckBox(opts_frame, text="Collapse consecutive entries", variable=self.collapse_var)
-        self.collapse_cb.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="w")
+        self.collapse_cb.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="w")
 
         # Frames checkbox
         self.frames_var = ctk.BooleanVar(value=False)
         self.frames_cb = ctk.CTkCheckBox(opts_frame, text="Include frames in timecodes", variable=self.frames_var)
-        self.frames_cb.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="w")
+        self.frames_cb.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="w")
 
         # Output path
-        ctk.CTkLabel(opts_frame, text="Output:").grid(row=4, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(opts_frame, text="Output:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
         output_row = ctk.CTkFrame(opts_frame, fg_color="transparent")
-        output_row.grid(row=4, column=1, padx=5, pady=5, sticky="ew")
+        output_row.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
         output_row.grid_columnconfigure(0, weight=1)
 
         self.output_var = ctk.StringVar(value="")
@@ -213,7 +228,6 @@ class App(ctk.CTk):
 
     def _load_config_into_ui(self) -> None:
         self.fps_var.set(str(self.config.get("fps", 25)))
-        self.delimiter_var.set(self.config.get("delimiter", "comma"))
         self.collapse_var.set(self.config.get("collapse", True))
         self.frames_var.set(self.config.get("frames", False))
         self.output_var.set(self.config.get("output_path", ""))
@@ -224,24 +238,55 @@ class App(ctk.CTk):
 
     def _save_ui_to_config(self) -> None:
         self.config["fps"] = int(self.fps_var.get())
-        self.config["delimiter"] = self.delimiter_var.get()
         self.config["collapse"] = self.collapse_var.get()
         self.config["frames"] = self.frames_var.get()
         self.config["output_path"] = self.output_var.get()
         self.config["exclusion_rules"] = self.exclusion_text.get("1.0", "end-1c")
         save_config(self.config)
 
+    # ── Path helpers ─────────────────────────────────────────────────
+
+    def _get_edl_path(self) -> Path:
+        return self._custom_edl_path or get_edl_path()
+
+    def _get_source_path(self) -> Path:
+        return self._custom_source_path or get_source_path()
+
     # ── Actions ──────────────────────────────────────────────────────
 
+    def _browse_edl(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Select EDL file",
+            filetypes=INPUT_FILETYPES,
+        )
+        if path:
+            self._custom_edl_path = Path(path)
+            self.edl_path_label.configure(text=path)
+
+    def _browse_source(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Select Source file",
+            filetypes=INPUT_FILETYPES,
+        )
+        if path:
+            self._custom_source_path = Path(path)
+            self.source_path_label.configure(text=path)
+
     def _reset_edl(self) -> None:
-        reset_template_file(get_edl_path())
+        edl_path = get_edl_path()
+        reset_template_file(edl_path)
+        self._custom_edl_path = None
+        self.edl_path_label.configure(text=str(edl_path))
         self._log("EDL file reset to template.")
-        open_file_in_default_app(get_edl_path())
+        open_file_in_default_app(edl_path)
 
     def _reset_source(self) -> None:
-        reset_template_file(get_source_path())
+        source_path = get_source_path()
+        reset_template_file(source_path)
+        self._custom_source_path = None
+        self.source_path_label.configure(text=str(source_path))
         self._log("Source file reset to template.")
-        open_file_in_default_app(get_source_path())
+        open_file_in_default_app(source_path)
 
     def _browse_output(self) -> None:
         path = filedialog.asksaveasfilename(
@@ -257,8 +302,8 @@ class App(ctk.CTk):
         self._save_ui_to_config()
         self._clear_log()
 
-        edl_path = get_edl_path()
-        source_path = get_source_path()
+        edl_path = self._get_edl_path()
+        source_path = self._get_source_path()
         output_path = self.output_var.get().strip()
 
         if not output_path:
@@ -321,7 +366,6 @@ class App(ctk.CTk):
         """Run conversion in a background thread, capturing stdout."""
         fps = int(self.fps_var.get())
         collapse = self.collapse_var.get()
-        delimiter = "," if self.delimiter_var.get() == "comma" else "\t"
         include_frames = self.frames_var.get()
 
         # Capture stdout to display in the log
@@ -336,7 +380,6 @@ class App(ctk.CTk):
                 output_path=output_path,
                 fps=fps,
                 collapse=collapse,
-                delimiter=delimiter,
                 exclusion_rules=exclusion_rules,
                 include_frames=include_frames,
             )
